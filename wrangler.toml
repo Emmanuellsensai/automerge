@@ -1,0 +1,21 @@
+name = "automerge"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV bindings — create with:
+#   npx wrangler kv namespace create AUTOMERGE
+#   npx wrangler kv namespace create AUTOMERGE --preview
+[[kv_namespaces]]
+binding = "AUTOMERGE"
+id = "REPLACE_WITH_KV_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   DISCORD_PUBLIC_KEY        - from Discord dev portal, General Info
+#   DISCORD_APPLICATION_ID    - from Discord dev portal
+#   DISCORD_BOT_TOKEN         - from Discord dev portal, Bot
+#   GITHUB_APP_ID             - from GitHub app settings
+#   GITHUB_APP_PRIVATE_KEY    - PEM string, from GitHub app
+#   GITHUB_WEBHOOK_SECRET     - shared secret set on the GitHub App
+#   ENCRYPTION_KEY            - 32-byte base64, used to encrypt user Gemini keys at rest
