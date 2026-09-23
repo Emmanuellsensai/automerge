@@ -11,7 +11,7 @@ export type UserConfig = {
   discordUserId: string;
   guildId?: string;
   githubInstallationId?: number;
-  geminiKeyCipher?: string; // AES-GCM encrypted
+  anthropicKeyCipher?: string; // AES-GCM encrypted
   enabled: boolean;
   autoMerge: boolean;
   mergeStrategy: "squash" | "merge" | "rebase";

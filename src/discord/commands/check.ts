@@ -17,7 +17,7 @@ export async function runCheck(env: Env, ctx: CommandContext) {
   const [, owner, repo] = m;
 
   const user = await getUser(env, ctx.userId);
-  if (!user?.geminiKeyCipher || !user.githubInstallationId) {
+  if (!user?.anthropicKeyCipher || !user.githubInstallationId) {
     return ephemeral("You need `/setup` and `/connect` before running a review.");
   }
   const repoCfg = await getRepo(env, owner!, repo!);
@@ -26,11 +26,16 @@ export async function runCheck(env: Env, ctx: CommandContext) {
   }
   const prNumber = prArg ? Number(prArg) : undefined;
 
-  // Run in background; reply immediately.
-  ctx.interaction._ctx?.waitUntil?.(reviewPR(env, { owner: owner!, repo: repo!, prNumber }));
+  // We're already running inside the interaction's executionCtx.waitUntil (see interactions.ts),
+  // so awaiting the review here lets us report the real outcome — no silent drops.
+  try {
+    await reviewPR(env, { owner: owner!, repo: repo!, prNumber, force: true });
+  } catch (e) {
+    return ephemeral(`Review failed: \`${(e as Error).message}\``);
+  }
   return ephemeral(
     prNumber
-      ? `Kicked off a review of **${owner}/${repo}#${prNumber}**.`
-      : `Kicked off a review of every open PR on **${owner}/${repo}**.`,
+      ? `Review of **${owner}/${repo}#${prNumber}** finished — check the PR for the comment.`
+      : `Reviewed every open PR on **${owner}/${repo}**.`,
   );
 }

@@ -11,21 +11,21 @@ function getOption(interaction: any, name: string): string | undefined {
 }
 
 export async function runSetup(env: Env, ctx: CommandContext) {
-  const key = getOption(ctx.interaction, "gemini_api_key");
+  const key = getOption(ctx.interaction, "anthropic_api_key");
   if (!key) {
     return ephemeral(
-      "Usage: `/setup gemini_api_key:<your Gemini API key>`\n" +
-        "Grab a key at https://aistudio.google.com/app/apikey — it stays encrypted at rest and is only used to review your PRs.",
+      "Usage: `/setup anthropic_api_key:<your Anthropic API key>`\n" +
+        "Get a key at https://console.anthropic.com/settings/keys — it stays encrypted at rest and is only used to review your PRs.",
     );
   }
   const cipher = await encryptSecret(key, env.ENCRYPTION_KEY);
   await upsertUser(env, ctx.userId, {
     discordUserId: ctx.userId,
     guildId: ctx.guildId,
-    geminiKeyCipher: cipher,
+    anthropicKeyCipher: cipher,
   });
   return ephemeral(
-    "Gemini key saved (encrypted).\n" +
+    "Anthropic key saved (encrypted).\n" +
       "Next: run `/connect` and install the AutoMerge GitHub App on the repos you want managed.",
   );
 }

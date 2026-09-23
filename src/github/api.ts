@@ -72,7 +72,7 @@ export async function getCombinedStatus(
   owner: string,
   repo: string,
   sha: string,
-): Promise<{ state: string; total_count: number }> {
+): Promise<{ state: string; total_count: number; statuses: { context: string; state: string }[] }> {
   const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/commits/${sha}/status`);
   if (!r.ok) throw new Error(`getCombinedStatus: ${r.status}`);
   return r.json();
@@ -96,7 +96,14 @@ export async function getIssue(
   owner: string,
   repo: string,
   n: number,
-): Promise<{ number: number; title: string; body: string | null; labels: { name: string }[] }> {
+): Promise<{
+  number: number;
+  title: string;
+  body: string | null;
+  labels: { name: string }[];
+  assignees: { login: string }[];
+  state: string;
+}> {
   const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/${n}`);
   if (!r.ok) throw new Error(`getIssue: ${r.status}`);
   return r.json();

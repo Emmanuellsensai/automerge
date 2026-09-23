@@ -7,9 +7,9 @@ import { readFileSync, existsSync } from "node:fs";
 const commands = [
   {
     name: "setup",
-    description: "Save your Gemini API key (encrypted).",
+    description: "Save your Anthropic API key (encrypted).",
     options: [
-      { name: "gemini_api_key", description: "Your Gemini API key", type: 3, required: true },
+      { name: "anthropic_api_key", description: "Your Anthropic API key", type: 3, required: true },
     ],
   },
   {

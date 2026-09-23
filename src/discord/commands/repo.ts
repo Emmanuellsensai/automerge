@@ -1,5 +1,6 @@
 import type { Env } from "../../index";
-import { deleteRepo, getRepo, getUser, listReposFor, putRepo } from "../../kv/config";
+import { deleteRepo, getRepo, getUser, listReposFor, putRepo, setInstallation, upsertUser } from "../../kv/config";
+import { getInstallationForRepo } from "../../github/app";
 import { ephemeral } from "../interactions";
 
 type CommandContext = { userId: string; guildId?: string; interaction: any };
@@ -19,19 +20,36 @@ function parseSlug(slug?: string): { owner: string; repo: string } | null {
 
 export async function runRepo(env: Env, ctx: CommandContext) {
   const user = await getUser(env, ctx.userId);
-  if (!user?.githubInstallationId) {
-    return ephemeral("Run `/connect` first — I need a GitHub App installation before I can manage repos.");
+  if (!user) {
+    return ephemeral("Run `/setup` first — I need your Gemini key before I can manage repos.");
   }
   const { name, options } = subcommand(ctx.interaction);
 
   if (name === "add") {
     const slug = parseSlug(optVal(options, "slug"));
     if (!slug) return ephemeral("Usage: `/repo add slug:<owner/repo>`");
+
+    // Auto-discover the installation for this repo using the App's own credentials.
+    let installationId = user.githubInstallationId;
+    const discovered = await getInstallationForRepo(env, slug.owner, slug.repo).catch(() => null);
+    if (discovered) {
+      installationId = discovered;
+      if (installationId !== user.githubInstallationId) {
+        await upsertUser(env, ctx.userId, { githubInstallationId: installationId });
+        await setInstallation(env, installationId, ctx.userId);
+      }
+    }
+    if (!installationId) {
+      return ephemeral(
+        `I can't see **${slug.owner}/${slug.repo}** — install the AutoMerge GitHub App on it first via \`/connect\`, ` +
+          "then re-run this command.",
+      );
+    }
     await putRepo(env, {
       owner: slug.owner,
       repo: slug.repo,
       discordUserId: ctx.userId,
-      installationId: user.githubInstallationId,
+      installationId,
       addedAt: new Date().toISOString(),
     });
     return ephemeral(`Now managing **${slug.owner}/${slug.repo}**. New PRs will be reviewed automatically.`);

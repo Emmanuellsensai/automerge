@@ -8,7 +8,7 @@ export async function runStatus(env: Env, ctx: { userId: string; guildId?: strin
   const repos = await listReposFor(env, ctx.userId);
   const lines = [
     "**AutoMerge status**",
-    `- Gemini key: ${user.geminiKeyCipher ? "linked" : "missing"}`,
+    `- Anthropic key: ${user.anthropicKeyCipher ? "linked" : "missing"}`,
     `- GitHub installation: ${user.githubInstallationId ? `#${user.githubInstallationId}` : "not connected"}`,
     `- Processing: ${user.enabled ? "on" : "paused"}`,
     `- Auto-merge: ${user.autoMerge ? `on (${user.mergeStrategy})` : "off"}`,

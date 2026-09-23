@@ -23,7 +23,7 @@ function b64url(bytes: ArrayBuffer | Uint8Array): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function signAppJWT(env: Env): Promise<string> {
+export async function signAppJWT(env: Env): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const payload = { iat: now - 30, exp: now + 9 * 60, iss: env.GITHUB_APP_ID };
@@ -43,6 +43,25 @@ async function signAppJWT(env: Env): Promise<string> {
     new TextEncoder().encode(signingInput),
   );
   return `${signingInput}.${b64url(sig)}`;
+}
+
+export async function getInstallationForRepo(
+  env: Env,
+  owner: string,
+  repo: string,
+): Promise<number | null> {
+  const jwt = await signAppJWT(env);
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/installation`, {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "automerge-bot",
+    },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`getInstallationForRepo: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { id: number };
+  return data.id;
 }
 
 export async function installationToken(env: Env, installationId: number): Promise<string> {

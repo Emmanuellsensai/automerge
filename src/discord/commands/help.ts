@@ -3,9 +3,9 @@ import { ephemeral } from "../interactions";
 export function runHelp() {
   return ephemeral(
     [
-      "**AutoMerge** — auto-reviews and auto-merges PRs on your GitHub repos using Gemini.",
+      "**AutoMerge** — auto-reviews and auto-merges PRs on your GitHub repos using Claude Haiku 4.5.",
       "",
-      "`/setup` — one-time setup: paste your Gemini API key",
+      "`/setup` — one-time setup: paste your Anthropic API key",
       "`/connect` — install the GitHub App on the repos you want managed",
       "`/repo add <owner/repo>` — start managing a repo",
       "`/repo remove <owner/repo>` — stop managing a repo",

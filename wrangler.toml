@@ -8,8 +8,8 @@ compatibility_flags = ["nodejs_compat"]
 #   npx wrangler kv namespace create AUTOMERGE --preview
 [[kv_namespaces]]
 binding = "AUTOMERGE"
-id = "REPLACE_WITH_KV_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+id = "7f97c43cd2174d778e16ff283ed1c490"
+preview_id = "763702ce1ded41c0bea0dae19e5943b8"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 #   DISCORD_PUBLIC_KEY        - from Discord dev portal, General Info

@@ -10,10 +10,10 @@ type CommandContext = { userId: string; guildId?: string; interaction: any };
 
 export async function runConnect(env: Env, ctx: CommandContext) {
   const user = await getUser(env, ctx.userId);
-  if (!user?.geminiKeyCipher) {
-    return ephemeral("Run `/setup` first — I need a Gemini API key before connecting GitHub.");
+  if (!user?.anthropicKeyCipher) {
+    return ephemeral("Run `/setup` first — I need an Anthropic API key before connecting GitHub.");
   }
-  const appSlug = env.GITHUB_APP_ID ? "automerge-bot" : "automerge-bot";
+  const appSlug = "automerge-wave";
   const url = `https://github.com/apps/${appSlug}/installations/new?state=${encodeURIComponent(ctx.userId)}`;
   return ephemeral(
     `Install the AutoMerge GitHub App and pick the repos to manage:\n${url}\n\n` +

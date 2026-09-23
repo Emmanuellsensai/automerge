@@ -16,13 +16,46 @@ const APPLICATION_COMMAND = 2;
 
 const PONG = { type: 1 };
 const CHANNEL_MESSAGE_WITH_SOURCE = 4;
+const DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE = 5;
+const EPHEMERAL = 1 << 6;
 
 export function ephemeral(content: string) {
   return {
     type: CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content, flags: 1 << 6 }, // EPHEMERAL
+    data: { content, flags: EPHEMERAL },
   };
 }
+
+export function deferred() {
+  return {
+    type: DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { flags: EPHEMERAL },
+  };
+}
+
+// After deferring, use this to send the real response.
+export async function editDeferred(env: Env, interactionToken: string, content: string) {
+  const url = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${interactionToken}/messages/@original`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, flags: EPHEMERAL }),
+  });
+  if (!res.ok) console.error("editDeferred failed", res.status, await res.text());
+}
+
+type Handler = (env: Env, ctx: any) => Promise<{ type: number; data: any }>;
+
+const HANDLERS: Record<string, Handler> = {
+  setup: (env, ctx) => runSetup(env, ctx),
+  connect: (env, ctx) => runConnect(env, ctx),
+  repo: (env, ctx) => runRepo(env, ctx),
+  on: (env, ctx) => runOnOff(env, { ...ctx, enabled: true }),
+  off: (env, ctx) => runOnOff(env, { ...ctx, enabled: false }),
+  status: (env, ctx) => runStatus(env, ctx),
+  check: (env, ctx) => runCheck(env, ctx),
+  config: (env, ctx) => runConfig(env, ctx),
+};
 
 export async function handleDiscordInteraction(c: Context<{ Bindings: Env }>) {
   const rawBody = await c.req.text();
@@ -37,28 +70,26 @@ export async function handleDiscordInteraction(c: Context<{ Bindings: Env }>) {
     const userId: string = interaction.member?.user?.id ?? interaction.user?.id;
     const guildId: string | undefined = interaction.guild_id;
 
-    switch (name) {
-      case "setup":
-        return c.json(await runSetup(c.env, { userId, guildId, interaction }));
-      case "connect":
-        return c.json(await runConnect(c.env, { userId, guildId, interaction }));
-      case "repo":
-        return c.json(await runRepo(c.env, { userId, guildId, interaction }));
-      case "on":
-        return c.json(await runOnOff(c.env, { userId, guildId, enabled: true }));
-      case "off":
-        return c.json(await runOnOff(c.env, { userId, guildId, enabled: false }));
-      case "status":
-        return c.json(await runStatus(c.env, { userId, guildId }));
-      case "check":
-        return c.json(await runCheck(c.env, { userId, guildId, interaction }));
-      case "config":
-        return c.json(await runConfig(c.env, { userId, guildId, interaction }));
-      case "help":
-        return c.json(runHelp());
-      default:
-        return c.json(ephemeral(`Unknown command: /${name}`));
-    }
+    // /help is instant — respond directly.
+    if (name === "help") return c.json(runHelp());
+
+    const handler = HANDLERS[name];
+    if (!handler) return c.json(ephemeral(`Unknown command: /${name}`));
+
+    // Defer immediately so we never miss Discord's 3s deadline, then finish the work in the background.
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const result = await handler(c.env, { userId, guildId, interaction });
+          const content = result.data?.content ?? "Done.";
+          await editDeferred(c.env, interaction.token, content);
+        } catch (e) {
+          console.error(`command /${name} failed`, e);
+          await editDeferred(c.env, interaction.token, `Sorry, that failed: \`${(e as Error).message}\``);
+        }
+      })(),
+    );
+    return c.json(deferred());
   }
 
   return c.json(ephemeral("Unsupported interaction."));
