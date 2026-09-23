@@ -155,7 +155,7 @@ Turn auto-merge off immediately:
 /config auto_merge value:off
 ```
 
-Then open an issue on [sorolens/automerge](https://github.com/sorolens/automerge/issues) with the PR link.
+Then open an issue on [Emmanuellsensai/automerge](https://github.com/Emmanuellsensai/automerge/issues) with the PR link.
 
 ## Cost
 
@@ -170,4 +170,4 @@ You pay only for your own API usage. The bot's Cloudflare Worker and KV run on t
 * **Discord webhook signatures** are verified via ed25519 on every interaction.
 * **GitHub webhook signatures** are verified via HMAC-SHA256 on every event.
 * **No PR content, diff, or issue body** is stored on the server past the duration of a single review.
-* **Source code:** [github.com/sorolens/automerge](https://github.com/sorolens/automerge).
+* **Source code:** [github.com/Emmanuellsensai/automerge](https://github.com/Emmanuellsensai/automerge).
