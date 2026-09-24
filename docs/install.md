@@ -8,7 +8,7 @@ AutoMerge is a Discord bot and GitHub App that reads every pull request opened o
 
 * **A Discord server you own** (or a channel where you can invite the bot).
 * **The GitHub repo or org you want managed.** You must be an **Owner** on a personal repo or an **Admin** on an org.
-* **An Anthropic API key.** Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys). Cost is about **$0.007 per PR review**. $5 is enough for hundreds of reviews.
+* **An Anthropic API key.** Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys). Cost is about **$0.007 per PR review**. Mechanical rejections cost $0. $5 is enough for hundreds of reviews.
 
 ## 1. Add the bot to your Discord server
 
@@ -76,16 +76,6 @@ By default AutoMerge reviews and comments but does not merge. When you are ready
 /config auto_merge value:on
 ```
 
-Now, whenever a PR meets **all** these conditions, AutoMerge squash-merges it:
-
-1. **It references an issue** (`Closes #N` in the body).
-2. **The PR author is an official assignee** of that issue.
-3. **Claude's review verdict is `approve`.** No obvious bugs, addresses the acceptance criteria, no silent scope creep.
-4. **CI on the head commit is green.**
-5. **The PR is not a draft.**
-
-Everything else gets a review comment explaining what is blocking the merge. Contributors see clear next steps.
-
 Change the merge strategy any time:
 
 ```
@@ -110,19 +100,50 @@ Change the merge strategy any time:
 | `/config strategy value:<squash\|merge\|rebase>` | How to merge. |
 | `/help` | Show the command list. |
 
-## The strict five-gate merge rule
+## The strict gate rule
 
-AutoMerge only merges when **all five** of these are true. A single failure blocks the merge and posts a review comment.
+AutoMerge merges a PR only when **all** of these are true. Cheaper mechanical gates are checked first, so bad PRs never call Claude.
 
-1. **Claude verdict is `approve`.** Not `request_changes` or `comment`.
-2. **Claude confirms the PR addresses the linked issue.**
-3. **CI on the head commit is passing.** Missing, pending, or failing blocks the merge.
-4. **Maintainer has `/config auto_merge value:on`.**
-5. **PR author is an official assignee of the linked issue.**
+### Mechanical gates (no Claude spend)
 
-Preview-deployment checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored when computing CI state. They gate on maintainer approval, not code quality.
+1. **Linked issue exists** (`Closes #N` in the PR body) and the bot can read it.
+2. **PR author is an official assignee** of the linked issue.
+3. **No dependency-manifest changes.** `package.json`, `pnpm-lock.yaml`, `go.mod`, `Cargo.toml`, `requirements.txt`, and eight other manifest files are treated as policy decisions and always need a human.
+4. **Every changed file is in scope.** File paths named in backticks inside the linked issue body are the scope. Tests (`*_test.go`, `*.test.ts`, `*.spec.tsx`, etc.) and docs (`docs/*`, `*.md`) are always allowed.
+5. **CI on the head commit is passing.** Missing, pending, or failing blocks the merge. Preview-deployment checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored because they gate on maintainer approval, not code.
+
+### Claude review (one call per commit SHA)
+
+6. **Claude verdict is `approve`.** Not `request_changes` or `comment`.
+7. **Claude confirms the PR addresses the linked issue.**
+
+Claude is called **once per commit SHA** and the verdict is cached. Later webhooks on the same commit (CI settling, workflow completions) reuse the cached verdict and cost $0.
+
+### Configuration gate
+
+8. **Maintainer has `/config auto_merge value:on`.**
 
 **Drafts are never approved.** PRs with no `Closes #N` reference are automatically flagged.
+
+## What contributors see
+
+**One deduped comment per PR.** AutoMerge posts one comment on the first review and edits that same comment on every subsequent update. Contributors never see a wall of stale reviews.
+
+The comment always tells contributors exactly what to fix, in order:
+
+* **Missing linked issue** or **not assigned** — one terse note explaining the gate.
+* **Touches a dependency manifest** or **out of scope** — the exact blocking condition and which files triggered it.
+* **CI failing** — wait note.
+* **All gates green** — a friendly review from Claude, followed by an automatic squash-merge.
+
+## Auto-approving first-time contributor workflows
+
+Public GitHub repos gate first-time contributors' workflow runs behind a maintainer click. AutoMerge auto-approves those runs when the contributor is an assignee of the linked issue, so real code CI can execute without you clicking anything.
+
+Grant the GitHub App **Actions: Read and write** permission for this to work. If you installed AutoMerge before this feature shipped, do it now:
+
+1. Go to `https://github.com/settings/apps/automerge-wave/permissions`. Change **Actions** to **Read and write**. Save.
+2. Go to `https://github.com/settings/installations`. Click **Configure** on AutoMerge-wave. Click **Accept new permissions** at the top.
 
 ## Troubleshooting
 
@@ -142,9 +163,17 @@ Run `/check slug:<owner>/<repo> pr:<n>` in Discord to force a review. Common cau
 * **`401 invalid x-api-key`.** Re-check your key with `/setup`, then `/status`.
 * **CI is still pending.** Bot will not merge until it settles.
 
+### Bot posts one comment then never updates it
+
+That is the intended behavior. The comment is edited in place on every re-run to keep the PR page clean. Refresh the PR to see the latest text.
+
 ### "Auto-merge attempted but got: 405 Method Not Allowed."
 
 The GitHub App installation does not have write access to Contents. Reinstall on the repo and grant the requested permissions.
+
+### First-time contributor workflows still need manual approval
+
+The Actions permission was not granted. See "Auto-approving first-time contributor workflows" above.
 
 ### Bot merged the wrong PR
 
@@ -159,7 +188,11 @@ Then open an issue on [Emmanuellsensai/automerge](https://github.com/Emmanuellse
 
 ## Cost
 
-Each review calls Claude Haiku 4.5 once with the PR diff (capped at 8k characters) plus prompt. **Typical cost per review is about $0.007. $1 covers roughly 150 reviews.**
+Each review calls Claude Haiku 4.5 **once per commit SHA** with the PR diff (capped at 8k characters) plus prompt. Later webhooks on the same commit are free.
+
+* **Typical cost per merged PR:** about $0.007.
+* **Mechanical rejections (missing assignee, out of scope, dep changes):** $0.
+* **$1 covers roughly 150 reviews.**
 
 You pay only for your own API usage. The bot's Cloudflare Worker and KV run on the free tier.
 
@@ -167,6 +200,7 @@ You pay only for your own API usage. The bot's Cloudflare Worker and KV run on t
 
 * **Your Anthropic API key is encrypted** with AES-GCM before being stored in Cloudflare KV. It is decrypted only in memory at the moment a review runs.
 * **GitHub App installation tokens** are minted per request and never cached.
+* **PR code is never checked out.** AutoMerge inspects diffs through the GitHub API only.
 * **Discord webhook signatures** are verified via ed25519 on every interaction.
 * **GitHub webhook signatures** are verified via HMAC-SHA256 on every event.
 * **No PR content, diff, or issue body** is stored on the server past the duration of a single review.

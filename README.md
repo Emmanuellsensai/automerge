@@ -2,7 +2,7 @@
 
 **A Discord bot and GitHub App that reviews and squash-merges pull requests using Claude Haiku 4.5.**
 
-Any maintainer can install it. Run `/setup`, paste an Anthropic API key, install the AutoMerge GitHub App on your repos, and AutoMerge takes it from there. It reads each PR, cross-references the linked issue, checks CI, and either posts review feedback or squash-merges the PR when it is clean.
+Any maintainer can install it. Run `/setup`, paste an Anthropic API key, install the AutoMerge GitHub App on the repos you want managed, and AutoMerge takes it from there. It reads each PR, cross-references the linked issue, checks CI, and either posts review feedback or squash-merges the PR when it is clean.
 
 <p align="center">
   <a href="https://discord.com/oauth2/authorize?client_id=1552301499139493888&scope=applications.commands+bot"><img alt="Add to Discord" src="https://img.shields.io/badge/Add%20to-Discord-5865F2?logo=discord&logoColor=white&style=for-the-badge"></a>
@@ -16,22 +16,35 @@ Any maintainer can install it. Run `/setup`, paste an Anthropic API key, install
 
 * **Reads every PR** opened on your managed repos.
 * **Finds the linked issue** via `Closes #N` or `Fixes #N`.
-* **Runs the diff through Claude Haiku 4.5** with a strict reviewer prompt.
+* **Runs mechanical gates first** so a bad PR is rejected before spending any Claude tokens.
+* **Runs the diff through Claude Haiku 4.5** with a strict reviewer prompt, once per commit SHA.
+* **Auto-approves pending workflow runs** so first-time contributors' CI actually executes.
 * **Checks CI** on the head commit. Preview-deploy checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored.
-* **Comments on the PR** with a clear, addressable review.
-* **Squash-merges** the PR only when every one of the five strict gates passes.
+* **Edits a single deduped comment** on the PR so contributors see one always-current review instead of a wall.
+* **Squash-merges** the PR only when every gate passes.
 
-## The strict five-gate merge rule
+## The strict gate rule
 
-AutoMerge merges a PR **only when all five are true**. A single failure blocks the merge:
+AutoMerge merges a PR only when **all** these are true. A single failure blocks the merge:
 
-1. **Claude verdict is `approve`.** Not `request_changes` or `comment`.
-2. **Claude confirms the PR addresses the linked issue.**
-3. **CI on the head commit is passing.** Missing, pending, or failing blocks the merge.
-4. **Maintainer has `/config auto_merge value:on`.**
-5. **PR author is an official assignee of the linked issue.**
+1. **Linked issue exists** and the bot can read it (`Closes #N` in the PR body).
+2. **PR author is an official assignee** of the linked issue.
+3. **No dependency-manifest changes.** `package.json`, `go.mod`, `Cargo.toml`, and eleven other manifest files are treated as policy decisions and always need a human.
+4. **Every changed file is in scope.** File paths named in backticks inside the linked issue body are the scope. Tests and docs are always allowed.
+5. **CI on the head commit is passing.** Missing, pending, or failing blocks the merge (unless the only checks are ignored preview deploys).
+6. **Claude verdict is `approve`.** Not `request_changes` or `comment`.
+7. **Claude confirms the PR addresses the linked issue.**
+8. **Maintainer has `/config auto_merge value:on`.**
 
 Drafts are never approved. PRs with no `Closes #N` reference are automatically flagged for changes.
+
+## Cost
+
+Each PR costs about **$0.007** the first time Claude reviews the head commit. Later webhooks on the same commit (CI settling, workflow completions) reuse the cached verdict and cost **$0**. **$5 in Anthropic credit covers roughly 700 reviews.**
+
+Mechanical-gate rejections cost **$0** — dependency, scope, and assignment failures never call Claude.
+
+You pay only for your own API usage. The bot runs on the Cloudflare Workers free tier.
 
 ## Slash commands
 
@@ -49,12 +62,6 @@ Drafts are never approved. PRs with no `Closes #N` reference are automatically f
 | `/config strategy value:<squash\|merge\|rebase>` | How to merge. |
 | `/help` | Show the command list. |
 
-## Cost
-
-Each review calls Claude Haiku 4.5 once. Typical cost is **about $0.007 per PR**. **$5 in Anthropic credit covers roughly 700 reviews.**
-
-You pay only for your own API usage. The bot runs on the Cloudflare Workers free tier.
-
 ## Architecture
 
 ```
@@ -68,7 +75,8 @@ Discord slash command                GitHub App webhook
              |                         |
              v                         v
       Cloudflare KV           Anthropic Messages API
-   (config, PR state)          (Claude Haiku 4.5)
+   (config, PR state,          (Claude Haiku 4.5)
+    cached verdicts)
 ```
 
 Per-user config, per-repo mapping, and per-PR review state live in Cloudflare KV. Your Anthropic API key is encrypted with AES-GCM using a Worker-side `ENCRYPTION_KEY`.
@@ -79,6 +87,7 @@ Per-user config, per-repo mapping, and per-PR review state live in Cloudflare KV
 * **Discord interactions are verified** via ed25519.
 * **GitHub webhooks are verified** via HMAC-SHA256.
 * **Installation tokens are minted per request.** Nothing longer-lived is cached.
+* **PR code is never checked out.** AutoMerge inspects diffs through the GitHub API only, never runs contributor code.
 * **No PR content, diff, or issue body is stored** past the duration of a review.
 
 ## Self-host
@@ -92,7 +101,7 @@ If you want to run your own AutoMerge instance instead of using the hosted one, 
 5. `pnpm register-commands`
 6. `pnpm deploy`
 
-Full self-hosting details are in `wrangler.toml` comments and this repo's history.
+Full self-hosting details are in `wrangler.toml` comments.
 
 ## Roadmap
 
