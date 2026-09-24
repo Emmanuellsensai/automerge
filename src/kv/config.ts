@@ -33,6 +33,10 @@ export type PRReviewState = {
   lastReviewAt?: string;
   status: "queued" | "reviewed" | "merged" | "commented" | "skipped";
   message?: string;
+  // Cached Claude verdict for this SHA. Set once per SHA to avoid re-billing on later webhooks.
+  cachedVerdict?: "approve" | "request_changes" | "comment";
+  cachedAddressesIssue?: boolean;
+  cachedCommentPosted?: boolean;
 };
 
 const userKey = (id: string) => `user:${id}`;

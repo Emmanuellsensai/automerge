@@ -125,6 +125,97 @@ export async function commentOnPR(
   if (!r.ok) throw new Error(`commentOnPR: ${r.status} ${await r.text()}`);
 }
 
+// Post a new comment or edit the existing one that carries `marker`.
+// The marker is an HTML comment invisible to human readers — same trick Wayfare's workflow uses.
+export async function upsertMarkedComment(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  n: number,
+  marker: string,
+  body: string,
+): Promise<void> {
+  const listRes = await ghFetch(
+    env,
+    installationId,
+    `/repos/${owner}/${repo}/issues/${n}/comments?per_page=100`,
+  );
+  if (listRes.ok) {
+    const comments = (await listRes.json()) as { id: number; body: string }[];
+    const existing = comments.find((c) => (c.body ?? "").includes(marker));
+    const finalBody = body.includes(marker) ? body : `${marker}\n\n${body}`;
+    if (existing) {
+      const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/comments/${existing.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: finalBody }),
+      });
+      if (!r.ok) throw new Error(`upsertMarkedComment (edit): ${r.status} ${await r.text()}`);
+      return;
+    }
+  }
+  await commentOnPR(env, installationId, owner, repo, n, body.includes(marker) ? body : `${marker}\n\n${body}`);
+}
+
+// List the files changed in a PR (paginated up to 300 files).
+export async function listPRFiles(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  n: number,
+): Promise<{ filename: string; status: string }[]> {
+  const out: { filename: string; status: string }[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const r = await ghFetch(
+      env,
+      installationId,
+      `/repos/${owner}/${repo}/pulls/${n}/files?per_page=100&page=${page}`,
+    );
+    if (!r.ok) break;
+    const batch = (await r.json()) as { filename: string; status: string }[];
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+export async function listWorkflowRunsAwaitingApproval(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  headSha: string,
+): Promise<{ id: number; status: string }[]> {
+  const r = await ghFetch(
+    env,
+    installationId,
+    `/repos/${owner}/${repo}/actions/runs?head_sha=${headSha}&per_page=30`,
+  );
+  if (!r.ok) return [];
+  const data = (await r.json()) as { workflow_runs?: { id: number; status: string }[] };
+  return (data.workflow_runs ?? []).filter((run) =>
+    ["action_required", "waiting"].includes(run.status),
+  );
+}
+
+export async function approveWorkflowRun(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  runId: number,
+): Promise<void> {
+  const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/actions/runs/${runId}/approve`, {
+    method: "POST",
+  });
+  if (!r.ok && r.status !== 404) {
+    // 404 means run isn't awaiting approval anymore; harmless.
+    throw new Error(`approveWorkflowRun: ${r.status} ${await r.text()}`);
+  }
+}
+
 export async function mergePR(
   env: Env,
   installationId: number,
