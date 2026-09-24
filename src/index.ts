@@ -3,7 +3,7 @@ import { handleDiscordInteraction } from "./discord/interactions";
 import { handleGitHubWebhook } from "./github/webhook";
 
 export type Env = {
-  AUTOMERGE: KVNamespace;
+  DB: D1Database;
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APPLICATION_ID: string;
   DISCORD_BOT_TOKEN: string;

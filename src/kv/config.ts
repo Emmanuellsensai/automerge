@@ -1,17 +1,16 @@
 import type { Env } from "../index";
 
-// User = the Discord user who ran /setup. They own the config and the linked GitHub App installation.
-// Data model in KV:
+// Data model, unchanged from the previous KV layout — only the backend changed.
 //   user:{discordUserId}                -> UserConfig
-//   repo:{owner}/{repo}                 -> RepoConfig (owner+repo -> discord user + installation)
-//   installation:{installationId}       -> discordUserId
-//   pr:{owner}/{repo}/{number}          -> per-PR review state (idempotency, last CI status)
+//   repo:{owner}/{repo}                 -> RepoConfig
+//   installation:{installationId}       -> discordUserId (string)
+//   pr:{owner}/{repo}/{number}          -> PRReviewState
 
 export type UserConfig = {
   discordUserId: string;
   guildId?: string;
   githubInstallationId?: number;
-  anthropicKeyCipher?: string; // AES-GCM encrypted
+  anthropicKeyCipher?: string;
   enabled: boolean;
   autoMerge: boolean;
   mergeStrategy: "squash" | "merge" | "rebase";
@@ -33,7 +32,6 @@ export type PRReviewState = {
   lastReviewAt?: string;
   status: "queued" | "reviewed" | "merged" | "commented" | "skipped";
   message?: string;
-  // Cached Claude verdict for this SHA. Set once per SHA to avoid re-billing on later webhooks.
   cachedVerdict?: "approve" | "request_changes" | "comment";
   cachedAddressesIssue?: boolean;
   cachedCommentPosted?: boolean;
@@ -45,12 +43,52 @@ const installKey = (id: number) => `installation:${id}`;
 const prKey = (owner: string, repo: string, n: number) =>
   `pr:${owner.toLowerCase()}/${repo.toLowerCase()}/${n}`;
 
+// ---- primitive storage layer (SQLite via D1) --------------------------------
+
+async function kvGet(env: Env, key: string): Promise<string | null> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare(
+    "SELECT value FROM kv WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+  )
+    .bind(key, now)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+async function kvPut(env: Env, key: string, value: string, ttlSeconds?: number): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = ttlSeconds ? now + ttlSeconds : null;
+  await env.DB.prepare(
+    "INSERT INTO kv (key, value, updated_at, expires_at) VALUES (?, ?, ?, ?) " +
+      "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, expires_at = excluded.expires_at",
+  )
+    .bind(key, value, now, expiresAt)
+    .run();
+}
+
+async function kvDelete(env: Env, key: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM kv WHERE key = ?").bind(key).run();
+}
+
+async function kvListWithPrefix(env: Env, prefix: string): Promise<{ key: string; value: string }[]> {
+  const now = Math.floor(Date.now() / 1000);
+  const { results } = await env.DB.prepare(
+    "SELECT key, value FROM kv WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
+  )
+    .bind(`${prefix}%`, now)
+    .all<{ key: string; value: string }>();
+  return results ?? [];
+}
+
+// ---- typed public API (unchanged surface) -----------------------------------
+
 export async function getUser(env: Env, discordUserId: string): Promise<UserConfig | null> {
-  return env.AUTOMERGE.get<UserConfig>(userKey(discordUserId), "json");
+  const raw = await kvGet(env, userKey(discordUserId));
+  return raw ? (JSON.parse(raw) as UserConfig) : null;
 }
 
 export async function putUser(env: Env, cfg: UserConfig): Promise<void> {
-  await env.AUTOMERGE.put(userKey(cfg.discordUserId), JSON.stringify(cfg));
+  await kvPut(env, userKey(cfg.discordUserId), JSON.stringify(cfg));
 }
 
 export async function upsertUser(
@@ -62,7 +100,7 @@ export async function upsertUser(
     discordUserId,
     enabled: true,
     autoMerge: true,
-    mergeStrategy: "squash",
+    mergeStrategy: "squash" as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -76,45 +114,43 @@ export async function upsertUser(
 }
 
 export async function getRepo(env: Env, owner: string, repo: string): Promise<RepoConfig | null> {
-  return env.AUTOMERGE.get<RepoConfig>(repoKey(owner, repo), "json");
+  const raw = await kvGet(env, repoKey(owner, repo));
+  return raw ? (JSON.parse(raw) as RepoConfig) : null;
 }
 
 export async function putRepo(env: Env, cfg: RepoConfig): Promise<void> {
-  await env.AUTOMERGE.put(repoKey(cfg.owner, cfg.repo), JSON.stringify(cfg));
+  await kvPut(env, repoKey(cfg.owner, cfg.repo), JSON.stringify(cfg));
 }
 
 export async function deleteRepo(env: Env, owner: string, repo: string): Promise<void> {
-  await env.AUTOMERGE.delete(repoKey(owner, repo));
+  await kvDelete(env, repoKey(owner, repo));
 }
 
 export async function listReposFor(env: Env, discordUserId: string): Promise<RepoConfig[]> {
+  const rows = await kvListWithPrefix(env, "repo:");
   const out: RepoConfig[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await env.AUTOMERGE.list({ prefix: "repo:", cursor });
-    for (const k of page.keys) {
-      const cfg = await env.AUTOMERGE.get<RepoConfig>(k.name, "json");
-      if (cfg?.discordUserId === discordUserId) out.push(cfg);
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
+  for (const row of rows) {
+    const cfg = JSON.parse(row.value) as RepoConfig;
+    if (cfg.discordUserId === discordUserId) out.push(cfg);
+  }
   return out;
 }
 
 export async function setInstallation(env: Env, installationId: number, discordUserId: string) {
-  await env.AUTOMERGE.put(installKey(installationId), discordUserId);
+  await kvPut(env, installKey(installationId), discordUserId);
 }
 
 export async function getInstallationOwner(env: Env, installationId: number): Promise<string | null> {
-  return env.AUTOMERGE.get(installKey(installationId));
+  return kvGet(env, installKey(installationId));
 }
 
 export async function getPRState(env: Env, owner: string, repo: string, n: number) {
-  return env.AUTOMERGE.get<PRReviewState>(prKey(owner, repo, n), "json");
+  const raw = await kvGet(env, prKey(owner, repo, n));
+  return raw ? (JSON.parse(raw) as PRReviewState) : null;
 }
 
-// Fields that we compare when deciding whether to skip a PUT. `lastReviewAt` is
-// intentionally excluded — it changes on every call and would defeat the dedupe.
+// Fields the state-equality check compares. `lastReviewAt` is deliberately
+// excluded — it changes on every call and would defeat the write dedupe.
 const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
   "lastCommitSha",
   "lastCiConclusion",
@@ -141,8 +177,6 @@ export async function putPRState(
   s: PRReviewState,
   prev?: PRReviewState | null,
 ) {
-  // Skip the write if nothing that matters changed. KV PUTs on Cloudflare's
-  // free tier are the tight resource here.
   if (statesEqual(prev, s)) return;
-  await env.AUTOMERGE.put(prKey(owner, repo, n), JSON.stringify(s), { expirationTtl: 60 * 60 * 24 * 30 });
+  await kvPut(env, prKey(owner, repo, n), JSON.stringify(s), 60 * 60 * 24 * 30);
 }

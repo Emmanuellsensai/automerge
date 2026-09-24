@@ -3,13 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# KV bindings — create with:
-#   npx wrangler kv namespace create AUTOMERGE
-#   npx wrangler kv namespace create AUTOMERGE --preview
-[[kv_namespaces]]
-binding = "AUTOMERGE"
-id = "7f97c43cd2174d778e16ff283ed1c490"
-preview_id = "763702ce1ded41c0bea0dae19e5943b8"
+# D1 database — create with:
+#   npx wrangler d1 create automerge
+#   npx wrangler d1 execute automerge --remote --file=migrations/0001_initial.sql
+#   npx wrangler d1 execute automerge --local  --file=migrations/0001_initial.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "automerge"
+database_id = "3ad5b82b-a742-446e-abf5-80f83bca3151"
 
 # Secrets (set via `wrangler secret put <NAME>`):
 #   DISCORD_PUBLIC_KEY        - from Discord dev portal, General Info
