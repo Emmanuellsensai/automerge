@@ -98,6 +98,8 @@ Change the merge strategy any time:
 | `/check slug:<owner/repo> [pr:<n>]` | Trigger a review right now. Dry-run friendly. |
 | `/config auto_merge value:<on\|off>` | Allow AutoMerge to press Merge. |
 | `/config strategy value:<squash\|merge\|rebase>` | How to merge. |
+| `/watch_claims channel:<#chan> repo:<owner/repo>` | Watch a channel for issue claims. |
+| `/link_github` | Contributor: link your GitHub login to your Discord id. |
 | `/help` | Show the command list. |
 
 ## The strict gate rule
@@ -144,6 +146,45 @@ Grant the GitHub App **Actions: Read and write** permission for this to work. If
 
 1. Go to `https://github.com/settings/apps/automerge-wave/permissions`. Change **Actions** to **Read and write**. Save.
 2. Go to `https://github.com/settings/installations`. Click **Configure** on AutoMerge-wave. Click **Accept new permissions** at the top.
+
+## Issue claims from Discord (optional)
+
+If your project also uses Discord to coordinate who works on what issue, AutoMerge can auto-assign issues on a first-come-first-served basis when someone claims one in a chat channel.
+
+### Maintainer setup
+
+1. Create a GitHub OAuth App (separate from the GitHub App used for reviews):
+   * Go to `https://github.com/settings/developers` and click **New OAuth App**.
+   * Authorization callback URL: `https://automerge.automergewave.workers.dev/github/oauth/callback`.
+   * Save. Copy the client id and generate a client secret.
+2. Register both with the Worker:
+   ```
+   wrangler secret put GITHUB_OAUTH_CLIENT_ID
+   wrangler secret put GITHUB_OAUTH_CLIENT_SECRET
+   ```
+3. Pick a channel in Discord where contributors will claim issues and get its channel id (right-click the channel with Developer Mode on).
+4. In any channel the bot can post in:
+   ```
+   /watch_claims channel:#your-channel repo:owner/repo
+   ```
+
+### Contributor flow
+
+Every contributor runs `/link_github` once. That opens a GitHub OAuth prompt, and the bot records their Discord id -> GitHub login. After that, whenever they post `#42` or a full issue URL in the watched channel, AutoMerge will:
+
+* Fetch the issue.
+* If unassigned, assign the author's linked login and react with a checkmark.
+* If already claimed, react with a no-entry sign and record the state (so the channel scan is O(new-messages), not O(total-messages)).
+
+### How the poll works
+
+A Cloudflare cron trigger fires once per minute. Each tick fetches new messages from every watched channel using the last-seen message id as an `after` cursor. This runs on the Workers free tier.
+
+### Limits and caveats
+
+* The GitHub App installation needs **Issues: Read and write** on the repo, otherwise assignment will fail with 422.
+* Only accounts that are collaborators of the repo (or org members with issue access) can be assigned. Attempted claims by unlinked or unauthorized users still get a reaction but no state is stored, so they can retry after being invited.
+* Bare `#N` matches inherit the channel's watched repo. Full URLs are only followed when they point to that same repo.
 
 ## Troubleshooting
 

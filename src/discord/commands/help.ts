@@ -15,6 +15,11 @@ export function runHelp() {
       "`/check <owner/repo> [pr]` trigger a review right now",
       "`/config auto_merge <on|off>` allow AutoMerge to press Merge",
       "`/config strategy <squash|merge|rebase>` how to merge",
+      "",
+      "**Issue claims** (optional):",
+      "`/watch_claims channel:<#chan> repo:<owner/repo>` maintainer: enable FCFS claims in a channel",
+      "`/link_github` contributor: link your GitHub login so you can claim",
+      "",
       "`/help` this list",
     ].join("\n"),
   );

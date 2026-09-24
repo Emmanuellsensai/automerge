@@ -3,6 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Cron: poll watched Discord channels every minute for new issue claims.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+# Public base URL of the Worker. Used to build the GitHub OAuth callback URL.
+PUBLIC_BASE_URL = "https://automerge.automergewave.workers.dev"
+
 # D1 database — create with:
 #   npx wrangler d1 create automerge
 #   npx wrangler d1 execute automerge --remote --file=migrations/0001_initial.sql
@@ -19,4 +27,6 @@ database_id = "3ad5b82b-a742-446e-abf5-80f83bca3151"
 #   GITHUB_APP_ID             - from GitHub app settings
 #   GITHUB_APP_PRIVATE_KEY    - PEM string, from GitHub app
 #   GITHUB_WEBHOOK_SECRET     - shared secret set on the GitHub App
-#   ENCRYPTION_KEY            - 32-byte base64, used to encrypt user Gemini keys at rest
+#   ENCRYPTION_KEY            - 32-byte base64, used to encrypt user API keys at rest
+#   GITHUB_OAUTH_CLIENT_ID    - OAuth App (separate from the GitHub App)
+#   GITHUB_OAUTH_CLIENT_SECRET - OAuth App client secret

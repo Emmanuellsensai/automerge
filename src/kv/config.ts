@@ -5,6 +5,11 @@ import type { Env } from "../index";
 //   repo:{owner}/{repo}                 -> RepoConfig
 //   installation:{installationId}       -> discordUserId (string)
 //   pr:{owner}/{repo}/{number}          -> PRReviewState
+//   claim_channel:{guildId}             -> WatchConfig
+//   contributor:{discordUserId}         -> ContributorLink
+//   oauth_state:{state}                 -> discordUserId (short TTL)
+//   last_msg:{channelId}                -> last Discord message id processed
+//   claimed:{owner}/{repo}/{issueN}     -> ClaimRecord
 
 export type UserConfig = {
   discordUserId: string;
@@ -42,6 +47,36 @@ const repoKey = (owner: string, repo: string) => `repo:${owner.toLowerCase()}/${
 const installKey = (id: number) => `installation:${id}`;
 const prKey = (owner: string, repo: string, n: number) =>
   `pr:${owner.toLowerCase()}/${repo.toLowerCase()}/${n}`;
+const watchKey = (guildId: string) => `claim_channel:${guildId}`;
+const contributorKey = (discordUserId: string) => `contributor:${discordUserId}`;
+const oauthStateKey = (state: string) => `oauth_state:${state}`;
+const lastMsgKey = (channelId: string) => `last_msg:${channelId}`;
+const claimKey = (owner: string, repo: string, issueN: number) =>
+  `claimed:${owner.toLowerCase()}/${repo.toLowerCase()}/${issueN}`;
+
+export type WatchConfig = {
+  guildId: string;
+  channelId: string;
+  owner: string;
+  repo: string;
+  installationId: number;
+  discordUserId: string;
+  addedAt: string;
+};
+
+export type ContributorLink = {
+  discordUserId: string;
+  githubLogin: string;
+  verifiedAt: string;
+};
+
+export type ClaimRecord = {
+  discordUserId?: string;
+  githubLogin: string;
+  at: string;
+  status: "claimed" | "already_taken" | "unlinked";
+  messageId?: string;
+};
 
 // ---- primitive storage layer (SQLite via D1) --------------------------------
 
@@ -179,4 +214,76 @@ export async function putPRState(
 ) {
   if (statesEqual(prev, s)) return;
   await kvPut(env, prKey(owner, repo, n), JSON.stringify(s), 60 * 60 * 24 * 30);
+}
+
+// ---- claim-flow helpers -----------------------------------------------------
+
+export async function getWatch(env: Env, guildId: string): Promise<WatchConfig | null> {
+  const raw = await kvGet(env, watchKey(guildId));
+  return raw ? (JSON.parse(raw) as WatchConfig) : null;
+}
+
+export async function putWatch(env: Env, cfg: WatchConfig): Promise<void> {
+  await kvPut(env, watchKey(cfg.guildId), JSON.stringify(cfg));
+}
+
+export async function listWatches(env: Env): Promise<WatchConfig[]> {
+  const rows = await kvListWithPrefix(env, "claim_channel:");
+  return rows.map((r) => JSON.parse(r.value) as WatchConfig);
+}
+
+export async function getContributor(
+  env: Env,
+  discordUserId: string,
+): Promise<ContributorLink | null> {
+  const raw = await kvGet(env, contributorKey(discordUserId));
+  return raw ? (JSON.parse(raw) as ContributorLink) : null;
+}
+
+export async function putContributor(env: Env, link: ContributorLink): Promise<void> {
+  await kvPut(env, contributorKey(link.discordUserId), JSON.stringify(link));
+}
+
+export async function putOAuthState(
+  env: Env,
+  state: string,
+  discordUserId: string,
+): Promise<void> {
+  // 10-minute TTL is plenty for a user to bounce through GitHub's consent screen.
+  await kvPut(env, oauthStateKey(state), discordUserId, 60 * 10);
+}
+
+export async function consumeOAuthState(env: Env, state: string): Promise<string | null> {
+  const raw = await kvGet(env, oauthStateKey(state));
+  if (raw) await kvDelete(env, oauthStateKey(state));
+  return raw;
+}
+
+export async function getLastMsg(env: Env, channelId: string): Promise<string | null> {
+  return kvGet(env, lastMsgKey(channelId));
+}
+
+export async function putLastMsg(env: Env, channelId: string, messageId: string): Promise<void> {
+  await kvPut(env, lastMsgKey(channelId), messageId);
+}
+
+export async function getClaim(
+  env: Env,
+  owner: string,
+  repo: string,
+  issueN: number,
+): Promise<ClaimRecord | null> {
+  const raw = await kvGet(env, claimKey(owner, repo, issueN));
+  return raw ? (JSON.parse(raw) as ClaimRecord) : null;
+}
+
+export async function putClaim(
+  env: Env,
+  owner: string,
+  repo: string,
+  issueN: number,
+  record: ClaimRecord,
+): Promise<void> {
+  // 90-day TTL. Long enough that a re-scan won't re-claim, short enough not to grow forever.
+  await kvPut(env, claimKey(owner, repo, issueN), JSON.stringify(record), 60 * 60 * 24 * 90);
 }

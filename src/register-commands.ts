@@ -61,6 +61,18 @@ const commands = [
     ],
   },
   { name: "help", description: "Show the AutoMerge help message." },
+  {
+    name: "watch_claims",
+    description: "Watch a channel for issue claims (FCFS assigns on GitHub).",
+    options: [
+      { name: "channel", description: "Channel ID to watch", type: 7, required: true },
+      { name: "repo", description: "owner/repo whose issues can be claimed here", type: 3, required: true },
+    ],
+  },
+  {
+    name: "link_github",
+    description: "Link your GitHub account so I can assign issues to you.",
+  },
 ];
 
 function loadDevVars(): void {
