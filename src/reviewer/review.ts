@@ -187,7 +187,7 @@ export async function reviewPR(
           status: "queued",
           lastReviewAt: new Date().toISOString(),
           message: "waiting for CI",
-        });
+        }, prev);
         continue;
       }
 
@@ -222,7 +222,7 @@ export async function reviewPR(
           status: "skipped",
           lastReviewAt: new Date().toISOString(),
           message: skipNote,
-        });
+        }, prev);
         continue;
       }
 
@@ -258,7 +258,7 @@ export async function reviewPR(
           status: "skipped",
           lastReviewAt: new Date().toISOString(),
           message: msg,
-        });
+        }, prev);
         continue;
       }
 
@@ -278,7 +278,7 @@ export async function reviewPR(
           status: "queued",
           lastReviewAt: new Date().toISOString(),
           message: `approved ${pending.length} workflow run(s), waiting for CI`,
-        });
+        }, prev);
         continue;
       }
 
@@ -346,7 +346,7 @@ export async function reviewPR(
           cachedVerdict: verdict,
           cachedAddressesIssue: addressesIssue,
           cachedCommentPosted: true,
-        });
+        }, prev);
       } else if (verdict === "approve" && addressesIssue && !ciAcceptable) {
         // Claude approved but CI hasn't settled yet — hold and wait for the next webhook,
         // which will re-enter and (with cached verdict) merge without a second Claude call.
@@ -359,7 +359,7 @@ export async function reviewPR(
           cachedVerdict: verdict,
           cachedAddressesIssue: addressesIssue,
           cachedCommentPosted: commentBody === null ? prev?.cachedCommentPosted === true : true,
-        });
+        }, prev);
       } else {
         await putPRState(env, args.owner, args.repo, n, {
           lastCommitSha: pr.head.sha,
@@ -370,7 +370,7 @@ export async function reviewPR(
           cachedVerdict: verdict,
           cachedAddressesIssue: addressesIssue,
           cachedCommentPosted: commentBody === null ? prev?.cachedCommentPosted === true : true,
-        });
+        }, prev);
       }
     } catch (e) {
       // Non-fatal: log-only. In production wire this to a logging sink.

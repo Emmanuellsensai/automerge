@@ -113,6 +113,36 @@ export async function getPRState(env: Env, owner: string, repo: string, n: numbe
   return env.AUTOMERGE.get<PRReviewState>(prKey(owner, repo, n), "json");
 }
 
-export async function putPRState(env: Env, owner: string, repo: string, n: number, s: PRReviewState) {
+// Fields that we compare when deciding whether to skip a PUT. `lastReviewAt` is
+// intentionally excluded — it changes on every call and would defeat the dedupe.
+const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
+  "lastCommitSha",
+  "lastCiConclusion",
+  "status",
+  "message",
+  "cachedVerdict",
+  "cachedAddressesIssue",
+  "cachedCommentPosted",
+];
+
+function statesEqual(a: PRReviewState | null | undefined, b: PRReviewState): boolean {
+  if (!a) return false;
+  for (const k of STATE_MEANINGFUL_FIELDS) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
+export async function putPRState(
+  env: Env,
+  owner: string,
+  repo: string,
+  n: number,
+  s: PRReviewState,
+  prev?: PRReviewState | null,
+) {
+  // Skip the write if nothing that matters changed. KV PUTs on Cloudflare's
+  // free tier are the tight resource here.
+  if (statesEqual(prev, s)) return;
   await env.AUTOMERGE.put(prKey(owner, repo, n), JSON.stringify(s), { expirationTtl: 60 * 60 * 24 * 30 });
 }
