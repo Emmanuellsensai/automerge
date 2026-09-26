@@ -396,6 +396,19 @@ async function reviewOne(
 
   // ---- gate 2: policy gates (deps, scope). Still no LLM spend. ----
   const changed = await listPRFiles(env, installationId, owner, repo, n);
+  if (changed.length === 0) {
+    gates.push(
+      { name: "Has changes", mark: "fail", note: `nothing differs from \`${base}\`` },
+      { name: "AI code review", mark: "skip", note: "nothing to review" },
+    );
+    steps.push({
+      title: `This PR has no changes compared to \`${base}\`.`,
+      detail:
+        `Everything in this branch is already on \`${base}\`, often because the same work was merged another way. ` +
+        "There is nothing left to review or merge, so this PR can be closed. If you meant to add more, push those commits and I'll review them.",
+    });
+    return finish("blocked", "AutoMerge: nothing left to merge in this PR", "this PR's changes already appear to be on the base branch.");
+  }
   const depHits = changed.filter((f) => DEPENDENCY_MANIFESTS.some((r) => r.test(f.filename)));
   const scope = extractIssueScopePaths(issue!.body);
   const outside = outOfScopeFiles(changed, scope).filter((f) => !depHits.includes(f));
