@@ -213,7 +213,7 @@ export type ReviewOutcome = {
 
 export async function reviewPR(
   env: Env,
-  args: { owner: string; repo: string; prNumber?: number; headSha?: string; force?: boolean },
+  args: { owner: string; repo: string; prNumber?: number; prNumbers?: number[]; headSha?: string; force?: boolean },
 ): Promise<ReviewOutcome[]> {
   const outcomes: ReviewOutcome[] = [];
   const repoCfg = await getRepo(env, args.owner, args.repo);
@@ -223,7 +223,9 @@ export async function reviewPR(
 
   const installationId = repoCfg.installationId;
   let prNumbers: number[];
-  if (args.prNumber) {
+  if (args.prNumbers) {
+    prNumbers = args.prNumbers;
+  } else if (args.prNumber) {
     prNumbers = [args.prNumber];
   } else {
     const open = await listOpenPRs(env, installationId, args.owner, args.repo);

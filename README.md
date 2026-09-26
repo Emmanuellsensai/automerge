@@ -20,6 +20,7 @@ Anyone who maintains a GitHub repo can use it. No coding needed: you type a few 
 * **Posts one comment with a numbered to-do list** for the contributor: which file and line, what is wrong, and the exact fix (including the git commands for things like merge conflicts). The comment updates itself on every push, so the PR page never fills up with old reviews.
 * **Lets first-time contributors' tests run** by approving their waiting workflow runs.
 * **Merges the PR** when everything passes, if you turned auto-merge on.
+* **Double-checks open PRs in the background** every 5 minutes (at most 2 per run), catching anything a webhook missed or a rate limit delayed. PRs that haven't changed are never sent to the AI again.
 * **Optional issue claims:** people post an issue number in a Discord channel and the first one gets assigned on GitHub.
 
 ## What a contributor sees

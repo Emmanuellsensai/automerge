@@ -295,3 +295,31 @@ export async function putClaim(
   // 90-day TTL. Long enough that a re-scan won't re-claim, short enough not to grow forever.
   await kvPut(env, claimKey(owner, repo, issueN), JSON.stringify(record), 60 * 60 * 24 * 90);
 }
+
+// ---- background sweep helpers ------------------------------------------------
+
+export async function listAllRepos(env: Env): Promise<RepoConfig[]> {
+  const rows = await kvListWithPrefix(env, "repo:");
+  return rows.map((r) => JSON.parse(r.value) as RepoConfig);
+}
+
+// All stored PR states for one repo in a single indexed range read.
+export async function listPRStates(env: Env, owner: string, repo: string): Promise<Map<number, PRReviewState>> {
+  const prefix = `pr:${owner.toLowerCase()}/${repo.toLowerCase()}/`;
+  const rows = await kvListWithPrefix(env, prefix);
+  const out = new Map<number, PRReviewState>();
+  for (const r of rows) out.set(Number(r.key.slice(prefix.length)), JSON.parse(r.value) as PRReviewState);
+  return out;
+}
+
+// When the sweep last picked each PR (unix seconds), so it rotates fairly and backs off.
+const sweepKey = (owner: string, repo: string) => `sweep:${owner.toLowerCase()}/${repo.toLowerCase()}`;
+
+export async function getSweepLog(env: Env, owner: string, repo: string): Promise<Record<string, number>> {
+  const raw = await kvGet(env, sweepKey(owner, repo));
+  return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+}
+
+export async function putSweepLog(env: Env, owner: string, repo: string, log: Record<string, number>): Promise<void> {
+  await kvPut(env, sweepKey(owner, repo), JSON.stringify(log));
+}

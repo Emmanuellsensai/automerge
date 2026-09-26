@@ -3,6 +3,7 @@ import { handleDiscordInteraction } from "./discord/interactions";
 import { handleGitHubWebhook } from "./github/webhook";
 import { handleOAuthStart, handleOAuthCallback } from "./github/oauth";
 import { pollAllWatches } from "./claims/poll";
+import { maybeSweep } from "./reviewer/sweep";
 
 export type Env = {
   DB: D1Database;
@@ -18,6 +19,8 @@ export type Env = {
   PUBLIC_BASE_URL: string;
   GEMINI_MODEL?: string;
   ANTHROPIC_MODEL?: string;
+  SWEEP_INTERVAL_MINUTES?: string;
+  SWEEP_MAX_PRS?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -37,7 +40,12 @@ app.get("/github/oauth/callback", (c) => handleOAuthCallback(c));
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(pollAllWatches(env));
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      Promise.all([
+        pollAllWatches(env).catch((e) => console.error("claims poll failed", e)),
+        maybeSweep(env, event.scheduledTime).catch((e) => console.error("PR sweep failed", e)),
+      ]),
+    );
   },
 };

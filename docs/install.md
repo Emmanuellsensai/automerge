@@ -88,6 +88,8 @@ For problems like merge conflicts or extra files, the comment includes the exact
 
 Contributors don't need to ask anyone for a re-review. AutoMerge re-checks on every push and whenever the PR description is edited.
 
+AutoMerge also looks over your open PRs in the background every 5 minutes, a couple at a time, so nothing gets stuck if GitHub drops a notification or the AI was busy. When you first add a repo, it works through the PRs that are already open at that pace (about 24 per hour). PRs that haven't changed are re-checked only every 6 hours and are never sent to the AI again. Maintainers can change the pace with `SWEEP_INTERVAL_MINUTES` and `SWEEP_MAX_PRS` in `wrangler.toml`.
+
 ## When does AutoMerge merge a PR?
 
 Only when **all** of these are true:

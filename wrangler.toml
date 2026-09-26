@@ -3,7 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron: poll watched Discord channels every minute for new issue claims.
+# Cron: every minute. Polls issue-claim channels each tick and sweeps open PRs every
+# SWEEP_INTERVAL_MINUTES (see [vars]).
 [triggers]
 crons = ["* * * * *"]
 
@@ -14,6 +15,10 @@ PUBLIC_BASE_URL = "https://automerge.automergewave.workers.dev"
 GEMINI_MODEL = "gemini-2.5-flash"
 # Backup reviewer, used only when Gemini is rate-limited, out of quota, overloaded, or times out.
 ANTHROPIC_MODEL = "claude-haiku-4-5"
+# Background check of open PRs (webhooks still review instantly). Every 5 minutes it reviews
+# at most 2 PRs that are new, changed, or waiting on CI. Raise slowly to stay under rate limits.
+SWEEP_INTERVAL_MINUTES = "5"
+SWEEP_MAX_PRS = "2"
 
 # D1 database — create with:
 #   npx wrangler d1 create automerge
