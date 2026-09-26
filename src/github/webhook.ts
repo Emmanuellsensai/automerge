@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { Env } from "../index";
-import { getRepo, setInstallation, upsertUser } from "../kv/config";
+import { getRepo, putRepo } from "../kv/config";
 import { reviewPR } from "../reviewer/review";
 
 async function verifySignature(secret: string, body: string, headerSig: string | null): Promise<boolean> {
@@ -31,20 +31,9 @@ export async function handleGitHubWebhook(c: Context<{ Bindings: Env }>) {
   const payload = JSON.parse(body);
   const installationId: number | undefined = payload.installation?.id;
 
-  // Installation created -> map to the Discord user carried in the state param on the setup callback.
-  if (event === "installation") {
-    // For installation.created we also want to remember who installed it. GitHub App setup callback
-    // preserves ?state=<discordUserId>; we rely on the caller having populated user config via that redirect.
-    // Here we just index the installation so lookups from other events work.
-    if (installationId && payload.action === "created") {
-      // If a Discord user has recently linked, they'll appear via the setup callback route (not implemented here);
-      // in the meantime accept a fallback header for local dev: X-AutoMerge-DiscordUser
-      const senderLogin: string | undefined = payload.sender?.login;
-      // best-effort; production should implement the /github/setup?installation_id&state callback.
-      if (senderLogin) await setInstallation(c.env, installationId, senderLogin);
-    }
-    return c.text("ok");
-  }
+  // Installations are mapped to Discord users by `/repo add`, which discovers the
+  // installation id through the App's own credentials.
+  if (event === "installation" || event === "installation_repositories") return c.text("ok");
 
   if (!installationId) return c.text("ignored: no installation", 202);
 
@@ -52,26 +41,43 @@ export async function handleGitHubWebhook(c: Context<{ Bindings: Env }>) {
   const repo: string | undefined = payload.repository?.name;
   if (!owner || !repo) return c.text("ignored: no repo", 202);
 
+  const relevant =
+    (event === "pull_request" &&
+      ["opened", "synchronize", "reopened", "ready_for_review", "edited"].includes(payload.action)) ||
+    (event === "check_suite" && payload.action === "completed") ||
+    (event === "workflow_run" && payload.action === "completed") ||
+    event === "status";
+
+  if (!relevant) return c.text("ignored: uninteresting event", 202);
+
+  // Description edits only matter when the text changed (e.g. a `Closes #N` line was added).
+  if (event === "pull_request" && payload.action === "edited" && !payload.changes?.body && !payload.changes?.title) {
+    return c.text("ignored: edit without body/title change", 202);
+  }
+
   const repoCfg = await getRepo(c.env, owner, repo);
   if (!repoCfg) return c.text("ignored: repo not managed", 202);
 
-  // Ensure user's installation is set (helps first-time flows)
-  await upsertUser(c.env, repoCfg.discordUserId, { githubInstallationId: installationId });
-
-  const relevant =
-    (event === "pull_request" && ["opened", "synchronize", "reopened", "ready_for_review"].includes(payload.action)) ||
-    event === "check_suite" ||
-    event === "status" ||
-    event === "workflow_run";
-
-  if (!relevant) return c.text("ignored: uninteresting event", 202);
+  if (repoCfg.installationId !== installationId) {
+    await putRepo(c.env, { ...repoCfg, installationId });
+  }
 
   const prNumber: number | undefined =
     payload.pull_request?.number ??
     payload.check_suite?.pull_requests?.[0]?.number ??
     payload.workflow_run?.pull_requests?.[0]?.number;
 
-  // Fire and forget review; return quickly to GitHub.
-  c.executionCtx.waitUntil(reviewPR(c.env, { owner, repo, prNumber }));
+  // Fork PRs arrive with an empty pull_requests list, so fall back to matching by head SHA.
+  const headSha: string | undefined =
+    payload.sha ?? payload.check_suite?.head_sha ?? payload.workflow_run?.head_sha;
+
+  if (!prNumber && !headSha) return c.text("ignored: no PR or sha", 202);
+
+  c.executionCtx.waitUntil(
+    reviewPR(c.env, { owner, repo, prNumber, headSha }).then(
+      () => undefined,
+      (e) => console.error("reviewPR failed", e),
+    ),
+  );
   return c.text("queued", 202);
 }

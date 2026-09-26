@@ -2,6 +2,7 @@ import type { Env } from "../../index";
 import { getRepo, getUser } from "../../kv/config";
 import { ephemeral } from "../interactions";
 import { reviewPR } from "../../reviewer/review";
+import { parseRepo, REPO_HINT } from "../parse-repo";
 
 type CommandContext = { userId: string; guildId?: string; interaction: any };
 
@@ -12,30 +13,42 @@ function optVal(interaction: any, name: string): string | undefined {
 export async function runCheck(env: Env, ctx: CommandContext) {
   const slug = optVal(ctx.interaction, "slug");
   const prArg = optVal(ctx.interaction, "pr");
-  const m = slug?.trim().match(/^([^\/\s]+)\/([^\/\s]+)$/);
-  if (!m) return ephemeral("Usage: `/check slug:<owner/repo> [pr:<number>]`");
-  const [, owner, repo] = m;
+  const parsed = parseRepo(slug);
+  if (!parsed) return ephemeral(`I couldn't read that repo. ${REPO_HINT}`);
+  const { owner, repo } = parsed;
+  // A pasted PR link carries the number too.
+  const prFromUrl = slug?.match(/\/pull\/(\d+)/)?.[1];
 
   const user = await getUser(env, ctx.userId);
-  if (!user?.anthropicKeyCipher || !user.githubInstallationId) {
-    return ephemeral("You need `/setup` and `/connect` before running a review.");
+  if (!user?.geminiKeyCipher || !user.githubInstallationId) {
+    return ephemeral("Setup isn't finished yet. Run `/status` to see which step is missing.");
   }
   const repoCfg = await getRepo(env, owner!, repo!);
   if (!repoCfg || repoCfg.discordUserId !== ctx.userId) {
-    return ephemeral(`Not managing **${owner}/${repo}** — add it with \`/repo add slug:${owner}/${repo}\`.`);
+    return ephemeral(`AutoMerge isn't watching **${owner}/${repo}** yet. Add it first with \`/repo add\`.`);
   }
-  const prNumber = prArg ? Number(prArg) : undefined;
+  const prNumber = prArg ? Number(prArg) : prFromUrl ? Number(prFromUrl) : undefined;
 
-  // We're already running inside the interaction's executionCtx.waitUntil (see interactions.ts),
-  // so awaiting the review here lets us report the real outcome — no silent drops.
+  // Already inside the interaction's waitUntil (see interactions.ts), so we can await the real outcome.
+  let outcomes;
   try {
-    await reviewPR(env, { owner: owner!, repo: repo!, prNumber, force: true });
+    outcomes = await reviewPR(env, { owner: owner!, repo: repo!, prNumber, force: true });
   } catch (e) {
     return ephemeral(`Review failed: \`${(e as Error).message}\``);
   }
-  return ephemeral(
-    prNumber
-      ? `Review of **${owner}/${repo}#${prNumber}** finished — check the PR for the comment.`
-      : `Reviewed every open PR on **${owner}/${repo}**.`,
-  );
+  if (outcomes.length === 0) {
+    return ephemeral(
+      prNumber
+        ? `Nothing to review on **${owner}/${repo}#${prNumber}** (closed, or processing is paused with \`/off\`).`
+        : `No open PRs to review on **${owner}/${repo}**.`,
+    );
+  }
+  const lines: string[] = [];
+  for (const o of outcomes.slice(0, 10)) {
+    lines.push(`**#${o.number}** ${o.headline}${o.url ? ` (<${o.url}>)` : ""}`);
+    for (const s of o.steps.slice(0, 5)) lines.push(`  - ${s.replace(/\s+/g, " ").slice(0, 160)}`);
+  }
+  if (outcomes.length > 10) lines.push(`...and ${outcomes.length - 10} more.`);
+  // Discord caps message content at 2000 characters.
+  return ephemeral(lines.join("\n").slice(0, 1990));
 }

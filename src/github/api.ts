@@ -42,7 +42,7 @@ export async function listOpenPRs(
   owner: string,
   repo: string,
 ): Promise<PR[]> {
-  const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/pulls?state=open&per_page=30`);
+  const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/pulls?state=open&per_page=100`);
   if (!r.ok) throw new Error(`listOpenPRs: ${r.status}`);
   return r.json();
 }
@@ -72,7 +72,11 @@ export async function getCombinedStatus(
   owner: string,
   repo: string,
   sha: string,
-): Promise<{ state: string; total_count: number; statuses: { context: string; state: string }[] }> {
+): Promise<{
+  state: string;
+  total_count: number;
+  statuses: { context: string; state: string; target_url?: string | null; description?: string | null }[];
+}> {
   const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/commits/${sha}/status`);
   if (!r.ok) throw new Error(`getCombinedStatus: ${r.status}`);
   return r.json();
@@ -84,8 +88,18 @@ export async function getCheckRuns(
   owner: string,
   repo: string,
   sha: string,
-): Promise<{ total_count: number; check_runs: { conclusion: string | null; status: string; name: string }[] }> {
-  const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/commits/${sha}/check-runs`);
+): Promise<{
+  total_count: number;
+  check_runs: {
+    conclusion: string | null;
+    status: string;
+    name: string;
+    html_url?: string | null;
+    details_url?: string | null;
+    output?: { title?: string | null; summary?: string | null } | null;
+  }[];
+}> {
+  const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`);
   if (!r.ok) throw new Error(`getCheckRuns: ${r.status}`);
   return r.json();
 }
@@ -146,6 +160,7 @@ export async function upsertMarkedComment(
     const existing = comments.find((c) => (c.body ?? "").includes(marker));
     const finalBody = body.includes(marker) ? body : `${marker}\n\n${body}`;
     if (existing) {
+      if (existing.body === finalBody) return;
       const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/comments/${existing.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

@@ -9,7 +9,7 @@ export async function runOnOff(
   await upsertUser(env, ctx.userId, { enabled: ctx.enabled });
   return ephemeral(
     ctx.enabled
-      ? "AutoMerge is **on**. New PRs will be reviewed and (if configured) auto-merged."
-      : "AutoMerge is **paused**. Existing state is kept; no new reviews will run.",
+      ? "AutoMerge is **on** again. New pull requests will be reviewed."
+      : "AutoMerge is **paused**. It won't review or merge anything until you run `/on`. Your settings are kept.",
   );
 }

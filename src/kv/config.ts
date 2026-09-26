@@ -15,7 +15,7 @@ export type UserConfig = {
   discordUserId: string;
   guildId?: string;
   githubInstallationId?: number;
-  anthropicKeyCipher?: string;
+  geminiKeyCipher?: string;
   enabled: boolean;
   autoMerge: boolean;
   mergeStrategy: "squash" | "merge" | "rebase";
@@ -35,9 +35,11 @@ export type PRReviewState = {
   lastCommitSha: string;
   lastCiConclusion?: string;
   lastReviewAt?: string;
-  status: "queued" | "reviewed" | "merged" | "commented" | "skipped";
+  status: "queued" | "reviewed" | "merged" | "commented" | "skipped" | "blocked";
   message?: string;
   cachedVerdict?: "approve" | "request_changes" | "comment";
+  cachedForIssue?: number;
+  cachedReview?: string;
   cachedAddressesIssue?: boolean;
   cachedCommentPosted?: boolean;
 };
@@ -134,7 +136,7 @@ export async function upsertUser(
   const existing = (await getUser(env, discordUserId)) ?? {
     discordUserId,
     enabled: true,
-    autoMerge: true,
+    autoMerge: false,
     mergeStrategy: "squash" as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -194,6 +196,8 @@ const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
   "cachedVerdict",
   "cachedAddressesIssue",
   "cachedCommentPosted",
+  "cachedForIssue",
+  "cachedReview",
 ];
 
 function statesEqual(a: PRReviewState | null | undefined, b: PRReviewState): boolean {

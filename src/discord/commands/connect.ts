@@ -10,13 +10,16 @@ type CommandContext = { userId: string; guildId?: string; interaction: any };
 
 export async function runConnect(env: Env, ctx: CommandContext) {
   const user = await getUser(env, ctx.userId);
-  if (!user?.anthropicKeyCipher) {
-    return ephemeral("Run `/setup` first — I need an Anthropic API key before connecting GitHub.");
+  if (!user?.geminiKeyCipher) {
+    return ephemeral("Step 1 isn't done yet. Run `/setup` and paste your Gemini API key first. `/help` walks you through it.");
   }
   const appSlug = "automerge-wave";
   const url = `https://github.com/apps/${appSlug}/installations/new?state=${encodeURIComponent(ctx.userId)}`;
   return ephemeral(
-    `Install the AutoMerge GitHub App and pick the repos to manage:\n${url}\n\n` +
-      "When you finish, come back and run `/repo list` to confirm.",
+    `**Step 2: give AutoMerge access to your repo**\n` +
+      `1. Open this link: ${url}\n` +
+      "2. Pick your account (or organization).\n" +
+      "3. Choose **Only select repositories**, tick the repo(s) you want AutoMerge to look after, and press **Install**.\n" +
+      "4. Come back here and run `/repo add`, pasting the repo's GitHub link.",
   );
 }

@@ -10,6 +10,8 @@ crons = ["* * * * *"]
 [vars]
 # Public base URL of the Worker. Used to build the GitHub OAuth callback URL.
 PUBLIC_BASE_URL = "https://automerge.automergewave.workers.dev"
+# Gemini model used for reviews. Change it here if Google releases a newer one.
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # D1 database — create with:
 #   npx wrangler d1 create automerge

@@ -2,6 +2,7 @@ import type { Env } from "../../index";
 import { deleteRepo, getRepo, getUser, listReposFor, putRepo, setInstallation, upsertUser } from "../../kv/config";
 import { getInstallationForRepo } from "../../github/app";
 import { ephemeral } from "../interactions";
+import { parseRepo, REPO_HINT } from "../parse-repo";
 
 type CommandContext = { userId: string; guildId?: string; interaction: any };
 
@@ -12,22 +13,17 @@ function subcommand(interaction: any): { name: string; options: any[] } {
 function optVal(options: any[], name: string): string | undefined {
   return options.find((o) => o.name === name)?.value;
 }
-function parseSlug(slug?: string): { owner: string; repo: string } | null {
-  if (!slug) return null;
-  const m = slug.trim().match(/^([^\/\s]+)\/([^\/\s]+)$/);
-  return m ? { owner: m[1]!, repo: m[2]! } : null;
-}
 
 export async function runRepo(env: Env, ctx: CommandContext) {
   const user = await getUser(env, ctx.userId);
   if (!user) {
-    return ephemeral("Run `/setup` first — I need your Gemini key before I can manage repos.");
+    return ephemeral("Step 1 isn't done yet. Run `/setup` and paste your Gemini API key first. `/help` walks you through it.");
   }
   const { name, options } = subcommand(ctx.interaction);
 
   if (name === "add") {
-    const slug = parseSlug(optVal(options, "slug"));
-    if (!slug) return ephemeral("Usage: `/repo add slug:<owner/repo>`");
+    const slug = parseRepo(optVal(options, "slug"));
+    if (!slug) return ephemeral(`I couldn't read that repo. ${REPO_HINT}`);
 
     // Auto-discover the installation for this repo using the App's own credentials.
     let installationId = user.githubInstallationId;
@@ -41,8 +37,8 @@ export async function runRepo(env: Env, ctx: CommandContext) {
     }
     if (!installationId) {
       return ephemeral(
-        `I can't see **${slug.owner}/${slug.repo}** — install the AutoMerge GitHub App on it first via \`/connect\`, ` +
-          "then re-run this command.",
+        `I can't see **${slug.owner}/${slug.repo}** yet. The AutoMerge GitHub App isn't installed on it.\n\n` +
+          "**Fix:** run `/connect`, click the link, tick this repo, press Install, then run this command again.",
       );
     }
     await putRepo(env, {
@@ -52,24 +48,25 @@ export async function runRepo(env: Env, ctx: CommandContext) {
       installationId,
       addedAt: new Date().toISOString(),
     });
-    return ephemeral(`Now managing **${slug.owner}/${slug.repo}**. New PRs will be reviewed automatically.`);
+    return ephemeral(`Done! AutoMerge is now watching **${slug.owner}/${slug.repo}**. Every new pull request will get a review comment.\n\n` +
+        "**Last step (optional):** run `/config auto_merge value:on` if you want AutoMerge to also merge PRs that pass every check. Until then it only comments.");
   }
 
   if (name === "remove") {
-    const slug = parseSlug(optVal(options, "slug"));
-    if (!slug) return ephemeral("Usage: `/repo remove slug:<owner/repo>`");
+    const slug = parseRepo(optVal(options, "slug"));
+    if (!slug) return ephemeral(`I couldn't read that repo. ${REPO_HINT}`);
     const existing = await getRepo(env, slug.owner, slug.repo);
     if (!existing || existing.discordUserId !== ctx.userId) {
-      return ephemeral("Not currently managing that repo.");
+      return ephemeral("AutoMerge isn't watching that repo, so there is nothing to remove. `/repo list` shows what it watches.");
     }
     await deleteRepo(env, slug.owner, slug.repo);
-    return ephemeral(`Removed **${slug.owner}/${slug.repo}**.`);
+    return ephemeral(`Stopped watching **${slug.owner}/${slug.repo}**. Nothing on GitHub was changed.`);
   }
 
   // list
   const repos = await listReposFor(env, ctx.userId);
-  if (repos.length === 0) return ephemeral("No repos managed yet. Add one with `/repo add slug:<owner/repo>`.");
+  if (repos.length === 0) return ephemeral("AutoMerge isn't watching any repos yet. Add one with `/repo add` and paste the repo's GitHub link.");
   return ephemeral(
-    ["**Managed repos:**", ...repos.map((r) => `- ${r.owner}/${r.repo}`)].join("\n"),
+    ["**Repos AutoMerge is watching:**", ...repos.map((r) => `- ${r.owner}/${r.repo}`)].join("\n"),
   );
 }

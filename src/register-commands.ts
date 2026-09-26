@@ -7,72 +7,66 @@ import { readFileSync, existsSync } from "node:fs";
 const commands = [
   {
     name: "setup",
-    description: "Save your Anthropic API key (encrypted).",
+    description: "Step 1: save your Gemini API key (free from aistudio.google.com/apikey).",
     options: [
-      { name: "anthropic_api_key", description: "Your Anthropic API key", type: 3, required: true },
+      { name: "gemini_api_key", description: "Paste your Gemini API key here", type: 3, required: true },
     ],
   },
-  {
-    name: "connect",
-    description: "Install the AutoMerge GitHub App and pick repos to manage.",
-  },
+  { name: "connect", description: "Step 2: get the link to install AutoMerge on your GitHub repo." },
   {
     name: "repo",
-    description: "Manage tracked repos.",
+    description: "Choose which GitHub repos AutoMerge looks after.",
     options: [
       {
-        type: 1, name: "add", description: "Start managing a repo",
-        options: [{ name: "slug", description: "owner/repo", type: 3, required: true }],
+        type: 1, name: "add", description: "Start watching a repo",
+        options: [{ name: "slug", description: "Paste the repo's GitHub link, or type owner/repo", type: 3, required: true }],
       },
       {
-        type: 1, name: "remove", description: "Stop managing a repo",
-        options: [{ name: "slug", description: "owner/repo", type: 3, required: true }],
+        type: 1, name: "remove", description: "Stop watching a repo",
+        options: [{ name: "slug", description: "Paste the repo's GitHub link, or type owner/repo", type: 3, required: true }],
       },
-      { type: 1, name: "list", description: "Show managed repos" },
+      { type: 1, name: "list", description: "Show the repos AutoMerge watches" },
     ],
   },
-  { name: "on", description: "Resume auto-processing." },
-  { name: "off", description: "Pause auto-processing." },
-  { name: "status", description: "Show connection and configuration state." },
+  { name: "on", description: "Turn AutoMerge back on." },
+  { name: "off", description: "Pause AutoMerge. Nothing gets reviewed or merged until /on." },
+  { name: "status", description: "See your setup checklist and what to do next." },
   {
     name: "check",
-    description: "Kick off a review right now.",
+    description: "Review a pull request right now.",
     options: [
-      { name: "slug", description: "owner/repo", type: 3, required: true },
-      { name: "pr", description: "PR number (optional)", type: 4, required: false },
+      { name: "slug", description: "Paste the PR link, or the repo link / owner/repo", type: 3, required: true },
+      { name: "pr", description: "PR number (not needed if you pasted a PR link)", type: 4, required: false },
     ],
   },
   {
     name: "config",
-    description: "Change AutoMerge settings.",
+    description: "Change how AutoMerge behaves.",
     options: [
       {
-        type: 1, name: "auto_merge", description: "Toggle auto-merge",
-        options: [{ name: "value", description: "on|off", type: 3, required: true, choices: [
-          { name: "on", value: "on" }, { name: "off", value: "off" },
+        type: 1, name: "auto_merge", description: "Let AutoMerge merge PRs that pass every check",
+        options: [{ name: "value", description: "on or off", type: 3, required: true, choices: [
+          { name: "on (merge PRs that pass)", value: "on" }, { name: "off (only comment)", value: "off" },
         ] }],
       },
       {
-        type: 1, name: "strategy", description: "Set merge strategy",
-        options: [{ name: "value", description: "squash|merge|rebase", type: 3, required: true, choices: [
-          { name: "squash", value: "squash" }, { name: "merge", value: "merge" }, { name: "rebase", value: "rebase" },
+        type: 1, name: "strategy", description: "Choose how PRs are merged",
+        options: [{ name: "value", description: "squash is recommended", type: 3, required: true, choices: [
+          { name: "squash (recommended)", value: "squash" }, { name: "merge", value: "merge" }, { name: "rebase", value: "rebase" },
         ] }],
       },
     ],
   },
-  { name: "help", description: "Show the AutoMerge help message." },
+  { name: "help", description: "How AutoMerge works and how to set it up." },
   {
     name: "watch_claims",
-    description: "Watch a channel for issue claims (FCFS assigns on GitHub).",
+    description: "Let people claim GitHub issues by posting the issue number in a channel.",
     options: [
-      { name: "channel", description: "Channel ID to watch", type: 7, required: true },
-      { name: "repo", description: "owner/repo whose issues can be claimed here", type: 3, required: true },
+      { name: "channel", description: "The channel where people claim issues", type: 7, required: true },
+      { name: "repo", description: "Paste the repo's GitHub link, or type owner/repo", type: 3, required: true },
     ],
   },
-  {
-    name: "link_github",
-    description: "Link your GitHub account so I can assign issues to you.",
-  },
+  { name: "link_github", description: "Connect your GitHub account so you can claim issues." },
 ];
 
 function loadDevVars(): void {
