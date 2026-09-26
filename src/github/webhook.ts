@@ -75,7 +75,9 @@ export async function handleGitHubWebhook(c: Context<{ Bindings: Env }>) {
 
   c.executionCtx.waitUntil(
     reviewPR(c.env, { owner, repo, prNumber, headSha }).then(
-      () => undefined,
+      (outcomes) => {
+        for (const o of outcomes) console.log(`webhook ${event}.${payload.action ?? ""} ${owner}/${repo}#${o.number}: ${o.status} ${o.headline}`);
+      },
       (e) => console.error("reviewPR failed", e),
     ),
   );
