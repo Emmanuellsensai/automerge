@@ -10,7 +10,7 @@ type CommandContext = { userId: string; guildId?: string; interaction: any };
 
 export async function runConnect(env: Env, ctx: CommandContext) {
   const user = await getUser(env, ctx.userId);
-  if (!user?.geminiKeyCipher) {
+  if (!(user?.geminiKeyCipher || user?.anthropicKeyCipher)) {
     return ephemeral("Step 1 isn't done yet. Run `/setup` and paste your Gemini API key first. `/help` walks you through it.");
   }
   const appSlug = "automerge-wave";

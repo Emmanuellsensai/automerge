@@ -34,6 +34,8 @@ Type `/help` in any channel. If AutoMerge answers, it's in.
 
 AutoMerge checks the key with Google right away. If it says the key isn't valid, copy it again and retry.
 
+**Optional backup key.** Gemini's free tier has rate limits. If you also add an Anthropic key, AutoMerge switches to Claude only when Gemini is rate-limited, out of quota, or overloaded, so reviews never stall. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
+
 Your key is encrypted before it is saved and is only used to review your PRs. Keep it private: don't paste it anywhere else in the chat.
 
 ## Step 3: Give AutoMerge access to your repo
@@ -96,10 +98,10 @@ Only when **all** of these are true:
 4. **Only files the issue covers are changed.** If the issue mentions file paths in backticks (like `` `src/api/handler.go` ``), the PR may only change those. Tests and docs are always allowed. If the issue names no paths, this check is skipped.
 5. **No merge conflicts.**
 6. **Automatic tests (CI) pass.** Preview-deploy checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored.
-7. **Gemini approves** and confirms the PR solves the issue.
+7. **The AI review approves** (Gemini, or Claude if Gemini was busy) and confirms the PR solves the issue.
 8. **You turned auto-merge on** (Step 5).
 
-Checks 1 to 4 are free. Gemini is only asked when they pass, and at most once per commit.
+Checks 1 to 4 are free. The AI is only asked when they pass, and at most once per commit.
 
 **Tip for maintainers:** write file paths in backticks in your issues. It keeps contributors focused and makes check 4 work.
 
@@ -164,7 +166,7 @@ This needs the **Actions: Read and write** permission. If you installed AutoMerg
 
 **The bot didn't comment on a PR**: type `/check` and paste the PR link. The answer in Discord tells you what happened. Common reasons: the PR is a draft, AutoMerge is paused (`/on`), or the repo isn't added (`/repo list`).
 
-**"Gemini 429" in a review**: you hit Gemini's rate limit or free-tier quota. Wait a bit, or add billing in Google AI Studio.
+**"Gemini 429" in a review**: you hit Gemini's rate limit or free-tier quota. Add an Anthropic backup key with `/setup anthropic_api_key:...` so Claude covers these moments, or add billing in Google AI Studio.
 
 **"The merge was rejected by GitHub"**: usually branch protection. Check the repo's branch rules, or merge by hand.
 
@@ -174,7 +176,7 @@ This needs the **Actions: Read and write** permission. If you installed AutoMerg
 
 ## Privacy and security
 
-* **Your Gemini key is encrypted** (AES-GCM) before it is saved, and decrypted only in memory while a review runs.
+* **Your API keys are encrypted** (AES-GCM) before they are saved, and decrypted only in memory while a review runs.
 * **Contributor code is never run.** AutoMerge only reads the changes through GitHub's API.
 * **What is stored:** your settings, the repos you watch, and each PR's latest review result (verdict, summary, and fix list) so the same commit is never reviewed twice. Review results expire after 30 days. Code, diffs, and issue text are not stored.
 * **Every message is verified:** Discord messages with ed25519 signatures, GitHub events with HMAC-SHA256.

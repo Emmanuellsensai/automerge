@@ -16,7 +16,7 @@ Anyone who maintains a GitHub repo can use it. No coding needed: you type a few 
 
 * **Reads every pull request** on the repos you choose.
 * **Checks the basics first, for free:** the PR links an issue, the author is assigned to that issue, it doesn't add dependencies, and it only touches the files the issue is about.
-* **Reviews the code with Gemini**, once per commit.
+* **Reviews the code with Gemini**, once per commit. If Gemini is rate-limited or out of quota, an optional **Anthropic (Claude) backup key** takes over so reviews don't stall.
 * **Posts one comment with a numbered to-do list** for the contributor: which file and line, what is wrong, and the exact fix (including the git commands for things like merge conflicts). The comment updates itself on every push, so the PR page never fills up with old reviews.
 * **Lets first-time contributors' tests run** by approving their waiting workflow runs.
 * **Merges the PR** when everything passes, if you turned auto-merge on.
@@ -47,7 +47,7 @@ Only when **all** of these are true:
 4. Every changed file is one the issue mentions (file paths written in backticks in the issue). Tests and docs are always allowed.
 5. No merge conflicts.
 6. Automatic tests (CI) pass. Preview-deploy checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored.
-7. Gemini approves the change and confirms it solves the issue.
+7. The AI review (Gemini, or Claude as backup) approves the change and confirms it solves the issue.
 8. The maintainer turned auto-merge on (`/config auto_merge value:on`). It is **off** by default.
 
 Draft PRs are never reviewed.
@@ -56,7 +56,9 @@ Draft PRs are never reviewed.
 
 You use your own Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). Google offers a free tier with daily limits and paid usage beyond that; check [Google's pricing page](https://ai.google.dev/pricing) for current numbers, since they change.
 
-To keep usage low, Gemini is called **at most once per commit**. PRs that fail the basic checks (no linked issue, not assigned, dependency or scope problems) never call Gemini at all.
+Optionally add an Anthropic API key as a backup. It is only used when Gemini returns a rate-limit, quota, or overload error, or times out; you pay Anthropic only for those reviews.
+
+To keep usage low, the AI is called **at most once per commit**. PRs that fail the basic checks (no linked issue, not assigned, dependency or scope problems) never call Gemini at all.
 
 The bot itself runs on the Cloudflare Workers free tier.
 
@@ -66,7 +68,7 @@ The bot itself runs on the Cloudflare Workers free tier.
 |---|---|
 | `/help` | How AutoMerge works and how to set it up. |
 | `/status` | Your setup checklist and what to do next. |
-| `/setup gemini_api_key:<key>` | Step 1: save your Gemini API key. It is checked with Google, then encrypted. |
+| `/setup gemini_api_key:<key> [anthropic_api_key:<key>]` | Step 1: save your Gemini API key, plus an optional Anthropic backup key. Keys are checked, then encrypted. |
 | `/connect` | Step 2: get the link to install AutoMerge on your GitHub repo. |
 | `/repo add slug:<link>` | Start watching a repo. Paste its GitHub link. |
 | `/repo remove slug:<link>` | Stop watching a repo. |
@@ -90,14 +92,14 @@ Discord slash command        GitHub App webhook        Cron (every minute)
 +-------------+--------------------------------------+---------------+
               |                                      |
               v                                      v
-     Cloudflare D1 (SQLite)                 Gemini generateContent API
+     Cloudflare D1 (SQLite)          Gemini API (main) -> Claude API (backup)
   (settings, repo list, PR state,
    cached review per commit)
 ```
 
 ## Security
 
-* **Gemini keys are checked, then encrypted at rest** (AES-GCM, random 96-bit IV). The plain key exists in memory only during a review.
+* **API keys (Gemini and the optional Anthropic backup) are checked, then encrypted at rest** (AES-GCM, random 96-bit IV). The plain key exists in memory only during a review.
 * **Discord interactions are verified** with ed25519, **GitHub webhooks** with HMAC-SHA256.
 * **GitHub installation tokens** are short-lived (about 1 hour) and kept only in the Worker's memory.
 * **Contributor code is never run or checked out.** AutoMerge reads diffs through the GitHub API.
@@ -113,7 +115,7 @@ Discord slash command        GitHub App webhook        Cron (every minute)
 5. `pnpm register-commands`
 6. `pnpm deploy`
 
-Optional: set `GEMINI_MODEL` in `wrangler.toml` `[vars]` to use a different Gemini model (default `gemini-2.5-flash`).
+Optional: set `GEMINI_MODEL` and `ANTHROPIC_MODEL` in `wrangler.toml` `[vars]` to change models (defaults `gemini-2.5-flash` and `claude-haiku-4-5`).
 
 ## License
 

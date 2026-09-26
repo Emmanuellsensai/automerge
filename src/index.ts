@@ -17,6 +17,7 @@ export type Env = {
   GITHUB_OAUTH_CLIENT_SECRET: string;
   PUBLIC_BASE_URL: string;
   GEMINI_MODEL?: string;
+  ANTHROPIC_MODEL?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();

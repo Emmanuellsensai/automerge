@@ -15,7 +15,10 @@ import {
 } from "../github/api";
 import { getPRState, getRepo, getUser, putPRState, type PRReviewState } from "../kv/config";
 import { decryptSecret } from "../kv/crypto";
-import { callGemini, DEFAULT_GEMINI_MODEL, type ReviewJSON, type ReviewProblem } from "./gemini";
+import { DEFAULT_GEMINI_MODEL } from "./gemini";
+import { DEFAULT_ANTHROPIC_MODEL } from "./claude";
+import { runReview, type LlmKeys } from "./llm";
+import type { ReviewJSON, ReviewProblem } from "./types";
 
 const DIFF_MAX_CHARS = 60_000;
 const COMMENT_MARKER = "<!-- automerge-gate -->";
@@ -216,7 +219,7 @@ export async function reviewPR(
   const repoCfg = await getRepo(env, args.owner, args.repo);
   if (!repoCfg) return outcomes;
   const user = await getUser(env, repoCfg.discordUserId);
-  if (!user?.enabled || !user.geminiKeyCipher) return outcomes;
+  if (!user?.enabled || (!user.geminiKeyCipher && !user.anthropicKeyCipher)) return outcomes;
 
   const installationId = repoCfg.installationId;
   let prNumbers: number[];
@@ -228,8 +231,13 @@ export async function reviewPR(
   }
   if (prNumbers.length === 0) return outcomes;
 
-  const apiKey = await decryptSecret(user.geminiKeyCipher, env.ENCRYPTION_KEY);
-  const model = env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+  const keys: LlmKeys = {};
+  if (user.geminiKeyCipher) {
+    keys.gemini = { apiKey: await decryptSecret(user.geminiKeyCipher, env.ENCRYPTION_KEY), model: env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL };
+  }
+  if (user.anthropicKeyCipher) {
+    keys.claude = { apiKey: await decryptSecret(user.anthropicKeyCipher, env.ENCRYPTION_KEY), model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL };
+  }
 
   for (const n of prNumbers) {
     try {
@@ -238,8 +246,7 @@ export async function reviewPR(
         repo: args.repo,
         n,
         installationId,
-        apiKey,
-        model,
+        keys,
         autoMerge: user.autoMerge,
         mergeStrategy: user.mergeStrategy,
         force: !!args.force,
@@ -260,8 +267,7 @@ async function reviewOne(
     repo: string;
     n: number;
     installationId: number;
-    apiKey: string;
-    model: string;
+    keys: LlmKeys;
     autoMerge: boolean;
     mergeStrategy: "squash" | "merge" | "rebase";
     force: boolean;
@@ -479,7 +485,7 @@ async function reviewOne(
       `<files>\n${changed.map((f) => `${f.status}\t${f.filename}`).join("\n")}\n</files>`,
       `<diff>\n${diff}\n</diff>`,
     ].join("\n\n");
-    review = await callGemini(a.apiKey, a.model, SYSTEM_PROMPT, userPrompt);
+    review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt);
   }
 
   const blocking = review.problems.filter((p) => p.severity === "blocking");
@@ -494,7 +500,8 @@ async function reviewOne(
   if (!approved && review.verdict === "request_changes" && blocking.length === 0 && review.missing_requirements.length === 0) {
     steps.push({ title: "The reviewer did not approve this change.", detail: review.summary });
   }
-  gates.push({ name: "AI code review", mark: approved ? "pass" : "fail", note: approved ? "approved" : "changes requested" });
+  const by = review.provider === "claude" ? "Claude" : "Gemini";
+  gates.push({ name: "AI code review", mark: approved ? "pass" : "fail", note: `${approved ? "approved" : "changes requested"} (${by})` });
 
   const cacheFields: Partial<PRReviewState> = {
     cachedVerdict: approved ? "approve" : "request_changes",

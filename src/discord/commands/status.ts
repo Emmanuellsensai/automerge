@@ -10,7 +10,7 @@ export async function runStatus(env: Env, ctx: { userId: string; guildId?: strin
   const contributor = await getContributor(env, ctx.userId);
   const watch = ctx.guildId ? await getWatch(env, ctx.guildId) : null;
 
-  const hasKey = !!user?.geminiKeyCipher;
+  const hasKey = !!(user?.geminiKeyCipher || user?.anthropicKeyCipher);
   const hasRepo = repos.length > 0;
   const autoMerge = !!user?.autoMerge;
 
@@ -24,7 +24,7 @@ export async function runStatus(env: Env, ctx: { userId: string; guildId?: strin
 
   const lines = [
     "**AutoMerge setup checklist**",
-    `${tick(hasKey)} 1. Gemini API key saved (\`/setup\`)`,
+    `${tick(hasKey)} 1. AI key saved (\`/setup\`): Gemini ${user?.geminiKeyCipher ? "✅" : "missing"}, Anthropic backup ${user?.anthropicKeyCipher ? "✅" : "not set (optional)"}`,
     `${tick(hasRepo)} 2. GitHub App installed and repo added (\`/connect\`, then \`/repo add\`)`,
     `${tick(autoMerge)} 3. Auto-merge turned on (optional, \`/config auto_merge\`)`,
     "",

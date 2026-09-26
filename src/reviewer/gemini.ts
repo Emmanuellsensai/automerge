@@ -1,24 +1,11 @@
 // Gemini generateContent client for the PR reviewer.
 // Direct fetch (no SDK) to stay lean inside a Cloudflare Worker.
 
-export type ReviewProblem = {
-  severity: "blocking" | "suggestion";
-  file: string;
-  line: number;
-  problem: string;
-  fix: string;
-};
-
-export type ReviewJSON = {
-  verdict: "approve" | "request_changes";
-  addresses_issue: boolean;
-  summary: string;
-  missing_requirements: string[];
-  problems: ReviewProblem[];
-};
+import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
-const PER_CALL_TIMEOUT_MS = 45_000;
+// Short enough that a Claude fallback still fits in the same Worker invocation.
+const PER_CALL_TIMEOUT_MS = 25_000;
 
 // Structured output schema (OpenAPI subset accepted by Gemini's responseSchema).
 const RESPONSE_SCHEMA = {
@@ -78,13 +65,19 @@ export async function callGemini(
       }),
       signal: controller.signal,
     });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw new ProviderUnavailableError("gemini", "Gemini timed out");
+    throw e;
   } finally {
     clearTimeout(t);
   }
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Gemini ${res.status}: ${body.slice(0, 300)}`);
+    const msg = `Gemini ${res.status}: ${body.slice(0, 300)}`;
+    // 429 = rate limit or quota exhausted; 500/503 = Google-side overload.
+    if (res.status === 429 || res.status === 500 || res.status === 503) throw new ProviderUnavailableError("gemini", msg);
+    throw new Error(msg);
   }
 
   const data = (await res.json()) as {
@@ -112,14 +105,5 @@ export async function callGemini(
       throw new Error(`Gemini returned non-JSON response: ${text.slice(0, 300)}`);
     }
   }
-  parsed.problems = Array.isArray(parsed.problems) ? parsed.problems : [];
-  parsed.missing_requirements = Array.isArray(parsed.missing_requirements) ? parsed.missing_requirements : [];
-  // Never trust an approve that still lists blocking work.
-  if (
-    parsed.verdict === "approve" &&
-    (parsed.problems.some((p) => p.severity === "blocking") || parsed.missing_requirements.length > 0)
-  ) {
-    parsed.verdict = "request_changes";
-  }
-  return parsed;
+  return { ...normalizeReview(parsed), provider: "gemini" };
 }

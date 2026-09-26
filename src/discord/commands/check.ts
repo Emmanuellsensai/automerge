@@ -20,7 +20,7 @@ export async function runCheck(env: Env, ctx: CommandContext) {
   const prFromUrl = slug?.match(/\/pull\/(\d+)/)?.[1];
 
   const user = await getUser(env, ctx.userId);
-  if (!user?.geminiKeyCipher || !user.githubInstallationId) {
+  if (!(user?.geminiKeyCipher || user?.anthropicKeyCipher) || !user.githubInstallationId) {
     return ephemeral("Setup isn't finished yet. Run `/status` to see which step is missing.");
   }
   const repoCfg = await getRepo(env, owner!, repo!);

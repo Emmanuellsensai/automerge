@@ -16,6 +16,7 @@ export type UserConfig = {
   guildId?: string;
   githubInstallationId?: number;
   geminiKeyCipher?: string;
+  anthropicKeyCipher?: string;
   enabled: boolean;
   autoMerge: boolean;
   mergeStrategy: "squash" | "merge" | "rebase";
