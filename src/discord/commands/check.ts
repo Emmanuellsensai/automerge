@@ -32,7 +32,8 @@ export async function runCheck(env: Env, ctx: CommandContext) {
   // Already inside the interaction's waitUntil (see interactions.ts), so we can await the real outcome.
   let outcomes;
   try {
-    outcomes = await reviewPR(env, { owner: owner!, repo: repo!, prNumber, force: true });
+    // A maintainer asking about one PR gets a fresh AI review; a whole-repo check reuses cached ones.
+    outcomes = await reviewPR(env, { owner: owner!, repo: repo!, prNumber, force: true, freshAi: !!prNumber });
   } catch (e) {
     return ephemeral(`Review failed: \`${(e as Error).message}\``);
   }

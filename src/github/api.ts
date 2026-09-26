@@ -91,6 +91,8 @@ export async function getCheckRuns(
 ): Promise<{
   total_count: number;
   check_runs: {
+    id: number;
+    started_at?: string | null;
     conclusion: string | null;
     status: string;
     name: string;

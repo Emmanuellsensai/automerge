@@ -37,6 +37,8 @@ Decide whether the PR can be merged as-is.
   - problem: one or two sentences on what is wrong and why it matters.
   - fix: the exact change to make, specific enough that the contributor can apply it without guessing. Name the functions, variables, and values involved. Include a short code snippet in a fenced block when it helps.
 - Do not invent problems. Style nits are never blocking. Do not comment on files that are not in the diff.
+- You can see only this diff, not the rest of the repository. Never mark a requirement missing, or ask for a "more thorough search", when it depends on code outside the diff that you cannot see (for example "migrate existing X"). If the PR description explains why part of the issue did not apply (for example, there was nothing to migrate) and nothing in the diff or file list contradicts it, accept that explanation and mention it in the summary so the maintainer can confirm.
+- Never list the same point twice: something in missing_requirements must not reappear in problems. Every problem's file must be a path from the diff; use "" and line 0 for anything not tied to a changed file.
 - If the diff is truncated, judge only what you can see. Use the full file list to avoid claiming something is missing when it may be in a file you cannot see.
 - summary: one or two plain sentences to the contributor. Friendly and direct. No emojis.`;
 
@@ -115,7 +117,14 @@ async function ciStatusOn(env: Env, installationId: number, owner: string, repo:
     getCheckRuns(env, installationId, owner, repo, sha).catch(() => ({ total_count: 0, check_runs: [] })),
   ]);
   const statuses = (status.statuses ?? []).filter((s) => !isIgnorable(s.context));
-  const runs = checks.check_runs.filter((c) => !isIgnorable(c.name));
+  // A re-run leaves the old run on the commit too; only the newest run of each check counts.
+  const latest = new Map<string, (typeof checks.check_runs)[number]>();
+  for (const c of checks.check_runs) {
+    if (isIgnorable(c.name)) continue;
+    const prev = latest.get(c.name);
+    if (!prev || c.id > prev.id) latest.set(c.name, c);
+  }
+  const runs = [...latest.values()];
 
   const failing: CiResult["failing"] = [
     ...statuses
@@ -175,7 +184,7 @@ function renderComment(o: {
   if (o.suggestions.length) {
     out.push("<details><summary>Optional suggestions (not required for merge)</summary>", "");
     for (const p of o.suggestions) {
-      out.push(`- **${loc(p)}**: ${p.problem}`, indent(`Suggestion: ${p.fix}`, 2));
+      out.push(`- ${loc(p) ? `**${loc(p)}**: ` : ""}${p.problem}`, indent(`Suggestion: ${p.fix}`, 2));
     }
     out.push("", "</details>", "");
   }
@@ -186,6 +195,7 @@ function renderComment(o: {
 }
 
 function loc(p: ReviewProblem): string {
+  if (!p.file) return "";
   return p.line > 0 ? `\`${p.file}:${p.line}\`` : `\`${p.file}\``;
 }
 
@@ -213,7 +223,7 @@ export type ReviewOutcome = {
 
 export async function reviewPR(
   env: Env,
-  args: { owner: string; repo: string; prNumber?: number; prNumbers?: number[]; headSha?: string; force?: boolean },
+  args: { owner: string; repo: string; prNumber?: number; prNumbers?: number[]; headSha?: string; force?: boolean; freshAi?: boolean },
 ): Promise<ReviewOutcome[]> {
   const outcomes: ReviewOutcome[] = [];
   const repoCfg = await getRepo(env, args.owner, args.repo);
@@ -252,6 +262,7 @@ export async function reviewPR(
         autoMerge: user.autoMerge,
         mergeStrategy: user.mergeStrategy,
         force: !!args.force,
+        freshAi: !!args.freshAi,
       });
       if (outcome) outcomes.push(outcome);
     } catch (e) {
@@ -273,6 +284,7 @@ async function reviewOne(
     autoMerge: boolean;
     mergeStrategy: "squash" | "merge" | "rebase";
     force: boolean;
+    freshAi: boolean;
   },
 ): Promise<ReviewOutcome | null> {
   const { owner, repo, n, installationId } = a;
@@ -472,6 +484,7 @@ async function reviewOne(
   // ---- gate 4: Gemini review (once per head SHA + linked issue) ----
   let review: ReviewJSON;
   const cachedOk =
+    !a.freshAi &&
     !!prev &&
     prev.lastCommitSha === pr.head.sha &&
     prev.cachedForIssue === issue!.number &&
@@ -490,13 +503,17 @@ async function reviewOne(
     review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt);
   }
 
+  // The model sometimes names a location that isn't a changed file; drop it rather than mislead.
+  const changedNames = new Set(changed.map((f) => f.filename));
+  for (const p of review.problems) if (!changedNames.has(p.file)) p.file = "";
   const blocking = review.problems.filter((p) => p.severity === "blocking");
   const suggestions = review.problems.filter((p) => p.severity !== "blocking");
   for (const req of review.missing_requirements) {
     steps.push({ title: `The issue asks for something this PR doesn't do yet: ${req}` });
   }
   for (const p of blocking) {
-    steps.push({ title: `${loc(p)}: ${p.problem}`, detail: `**Fix:** ${p.fix}` });
+    const where = loc(p);
+    steps.push({ title: where ? `${where}: ${p.problem}` : p.problem, detail: `**Fix:** ${p.fix}` });
   }
   const approved = review.verdict === "approve" && review.addresses_issue && blocking.length === 0 && review.missing_requirements.length === 0;
   if (!approved && review.verdict === "request_changes" && blocking.length === 0 && review.missing_requirements.length === 0) {
