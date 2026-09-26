@@ -3,7 +3,7 @@
 
 import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 // Short enough that a Claude fallback still fits in the same Worker invocation.
 const PER_CALL_TIMEOUT_MS = 25_000;
 
@@ -75,8 +75,9 @@ export async function callGemini(
   if (!res.ok) {
     const body = await res.text();
     const msg = `Gemini ${res.status}: ${body.slice(0, 300)}`;
-    // 429 = rate limit or quota exhausted; 500/503 = Google-side overload.
-    if (res.status === 429 || res.status === 500 || res.status === 503) throw new ProviderUnavailableError("gemini", msg);
+    // 429 = rate limit or quota exhausted; 500/503 = Google-side overload;
+    // 404 = model retired or not offered to this key. All mean "use the backup".
+    if ([404, 429, 500, 503].includes(res.status)) throw new ProviderUnavailableError("gemini", msg);
     throw new Error(msg);
   }
 

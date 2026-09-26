@@ -12,8 +12,8 @@ crons = ["* * * * *"]
 # Public base URL of the Worker. Used to build the GitHub OAuth callback URL.
 PUBLIC_BASE_URL = "https://automerge.automergewave.workers.dev"
 # Gemini model used for reviews. Change it here if Google releases a newer one.
-GEMINI_MODEL = "gemini-2.5-flash"
-# Backup reviewer, used only when Gemini is rate-limited, out of quota, overloaded, or times out.
+GEMINI_MODEL = "gemini-3.8-flash"
+# Backup reviewer, used only when Gemini is rate-limited, out of quota, overloaded, unavailable, or times out.
 ANTHROPIC_MODEL = "claude-haiku-4-5"
 # Background check of open PRs (webhooks still review instantly). Every 5 minutes it reviews
 # at most 2 PRs that are new, changed, or waiting on CI. Raise slowly to stay under rate limits.

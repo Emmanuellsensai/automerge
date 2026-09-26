@@ -116,7 +116,7 @@ Discord slash command        GitHub App webhook        Cron (every minute)
 5. `pnpm register-commands`
 6. `pnpm deploy`
 
-Optional: set `GEMINI_MODEL` and `ANTHROPIC_MODEL` in `wrangler.toml` `[vars]` to change models (defaults `gemini-2.5-flash` and `claude-haiku-4-5`).
+Optional: set `GEMINI_MODEL` and `ANTHROPIC_MODEL` in `wrangler.toml` `[vars]` to change models (defaults `gemini-3.8-flash` and `claude-haiku-4-5`).
 
 ## License
 
