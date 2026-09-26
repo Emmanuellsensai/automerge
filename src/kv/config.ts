@@ -108,12 +108,15 @@ async function kvDelete(env: Env, key: string): Promise<void> {
   await env.DB.prepare("DELETE FROM kv WHERE key = ?").bind(key).run();
 }
 
+// Range query instead of LIKE: SQLite's case-insensitive LIKE can't use the primary-key
+// index, so it would scan (and bill) every row in the table on each call.
 async function kvListWithPrefix(env: Env, prefix: string): Promise<{ key: string; value: string }[]> {
   const now = Math.floor(Date.now() / 1000);
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
   const { results } = await env.DB.prepare(
-    "SELECT key, value FROM kv WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
+    "SELECT key, value FROM kv WHERE key >= ? AND key < ? AND (expires_at IS NULL OR expires_at > ?)",
   )
-    .bind(`${prefix}%`, now)
+    .bind(prefix, upper, now)
     .all<{ key: string; value: string }>();
   return results ?? [];
 }
