@@ -74,7 +74,13 @@ export async function callGemini(
 
   if (!res.ok) {
     const body = await res.text();
-    const msg = `Gemini ${res.status}: ${body.slice(0, 300)}`;
+    let detail = body.slice(0, 300);
+    try {
+      // Google puts the useful part (which quota, which limit) in error.message.
+      const m = (JSON.parse(body) as { error?: { message?: string } }).error?.message;
+      if (m) detail = m.replace(/\s+/g, " ").slice(0, 1000);
+    } catch {}
+    const msg = `Gemini ${res.status}: ${detail}`;
     // 429 = rate limit or quota exhausted; 500/503 = Google-side overload;
     // 404 = model retired or not offered to this key. All mean "use the backup".
     if ([404, 429, 500, 503].includes(res.status)) throw new ProviderUnavailableError("gemini", msg);
