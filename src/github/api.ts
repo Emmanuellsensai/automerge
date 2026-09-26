@@ -160,7 +160,7 @@ export async function upsertMarkedComment(
   if (listRes.ok) {
     const comments = (await listRes.json()) as { id: number; body: string }[];
     const existing = comments.find((c) => (c.body ?? "").includes(marker));
-    const finalBody = body.includes(marker) ? body : `${marker}\n\n${body}`;
+    const finalBody = body.includes(marker) ? body : `${body}\n\n${marker}`;
     if (existing) {
       if (existing.body === finalBody) return;
       const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/comments/${existing.id}`, {
@@ -172,7 +172,7 @@ export async function upsertMarkedComment(
       return;
     }
   }
-  await commentOnPR(env, installationId, owner, repo, n, body.includes(marker) ? body : `${marker}\n\n${body}`);
+  await commentOnPR(env, installationId, owner, repo, n, body.includes(marker) ? body : `${body}\n\n${marker}`);
 }
 
 // List the files changed in a PR (paginated up to 300 files).

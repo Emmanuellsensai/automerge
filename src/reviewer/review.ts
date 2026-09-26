@@ -60,6 +60,7 @@ const DEPENDENCY_MANIFESTS = [
   /(^|\/)package-lock\.json$/i,
   /(^|\/)go\.mod$/i,
   /(^|\/)go\.sum$/i,
+  /(^|\/)go\.work(\.sum)?$/i,
   /(^|\/)Cargo\.toml$/i,
   /(^|\/)Cargo\.lock$/i,
   /(^|\/)requirements(-.*)?\.txt$/i,
@@ -101,7 +102,9 @@ function outOfScopeFiles(changed: ChangedFile[], scope: string[]): ChangedFile[]
   return changed.filter((f) => {
     if (/(_test\.(go|py|ts|tsx|js|jsx|rs))$|(\.test\.(ts|tsx|js|jsx))$|\.spec\.(ts|tsx|js|jsx)$/.test(f.filename)) return false;
     if (/^docs?\//i.test(f.filename) || /\.md$/i.test(f.filename)) return false;
-    return !scope.some((p) => f.filename === p || f.filename.startsWith(p + "/"));
+    // Issues often name a file without its extension (`cli/cmd/watchdog` for watchdog.go).
+    const noExt = f.filename.replace(/\.[^/.]+$/, "");
+    return !scope.some((p) => f.filename === p || noExt === p || f.filename.startsWith(p + "/"));
   });
 }
 
@@ -171,7 +174,7 @@ function renderComment(o: {
   gates: Gate[];
   footer: string;
 }): string {
-  const out: string[] = [COMMENT_MARKER, `### ${o.headline}`, "", `@${o.login} ${o.intro}`.trim(), ""];
+  const out: string[] = [`### ${o.headline}`, "", `@${o.login} ${o.intro}`.trim(), ""];
   if (o.steps.length) {
     out.push("**What to do to get this merged:**", "");
     o.steps.forEach((s, i) => {
@@ -190,7 +193,8 @@ function renderComment(o: {
   }
   out.push("<details><summary>Merge gate status</summary>", "", "| Gate | Status |", "|---|---|");
   for (const g of o.gates) out.push(`| ${g.name} | ${MARK[g.mark]} ${g.note} |`);
-  out.push("", "</details>", "", `<sub>${o.footer}</sub>`);
+  // Marker goes last so feed previews (Discord, email) start with the headline.
+  out.push("", "</details>", "", `<sub>${o.footer}</sub>`, "", COMMENT_MARKER);
   return out.join("\n");
 }
 
