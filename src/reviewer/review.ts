@@ -91,7 +91,10 @@ function extractIssueScopePaths(issueBody: string | null): string[] {
   return Array.from(
     new Set(
       raw
-        .map((t) => t.replace(/`/g, "").replace(/\/+$/, ""))
+        .map((t) => t.replace(/`/g, "").replace(/^\.\//, "").replace(/\/+$/, ""))
+        // MIME types and URL routes contain "/" but are not repository paths.
+        .filter((p) => !/^(text|application|image|audio|video|multipart|font|message)\/[\w.+-]+$/i.test(p))
+        .filter((p) => !p.startsWith("/"))
         .filter((p) => /\//.test(p) || /\.(go|ts|tsx|js|jsx|py|rs|md|ya?ml|json|sql|toml|sh)$/i.test(p)),
     ),
   );
@@ -314,7 +317,8 @@ async function reviewOne(
     extra: Partial<PRReviewState> = {},
     suggestions: ReviewProblem[] = [],
   ): Promise<ReviewOutcome> => {
-    const body = renderComment({ login, headline, intro, steps, suggestions, gates, footer: RECHECK_FOOTER });
+    const footer = `Checked commit \`${pr.head.sha.slice(0, 7)}\`. ${RECHECK_FOOTER}`;
+    const body = renderComment({ login, headline, intro, steps, suggestions, gates, footer });
     await upsertMarkedComment(env, installationId, owner, repo, n, COMMENT_MARKER, body);
     await putPRState(
       env,
@@ -415,7 +419,11 @@ async function reviewOne(
   }
   const depHits = changed.filter((f) => DEPENDENCY_MANIFESTS.some((r) => r.test(f.filename)));
   const scope = extractIssueScopePaths(issue!.body);
-  const outside = outOfScopeFiles(changed, scope).filter((f) => !depHits.includes(f));
+  // If no changed file matches anything the issue names, those names were probably not file
+  // paths (or the issue lists no real scope); leave scope to the AI review instead of
+  // declaring the whole PR out of scope.
+  const scopeUsable = scope.length > 0 && outOfScopeFiles(changed, scope).length < changed.length;
+  const outside = scopeUsable ? outOfScopeFiles(changed, scope).filter((f) => !depHits.includes(f)) : [];
 
   const revertCmd = (files: ChangedFile[]) =>
     files
@@ -435,7 +443,7 @@ async function reviewOne(
     gates.push({ name: "No new dependencies", mark: "pass", note: "untouched" });
   }
 
-  if (scope.length && outside.length) {
+  if (outside.length) {
     const shown = outside.slice(0, 15);
     gates.push({ name: "Only touches files the issue covers", mark: "fail", note: `${outside.length} file(s) outside #${issue!.number}` });
     steps.push({
@@ -448,10 +456,10 @@ async function reviewOne(
       commands: syncCommands(owner, repo, base, revertCmd(shown)),
     });
   } else {
-    gates.push({ name: "Only touches files the issue covers", mark: "pass", note: scope.length ? "all files in scope" : "issue names no paths" });
+    gates.push({ name: "Only touches files the issue covers", mark: "pass", note: scopeUsable ? "all files in scope" : "issue names no file paths (AI reviews scope)" });
   }
 
-  if (depHits.length || (scope.length && outside.length)) {
+  if (depHits.length || outside.length) {
     gates.push(
       { name: "Merge conflicts", mark: "skip", note: "not checked yet" },
       { name: "Automatic tests (CI)", mark: "skip", note: "not checked yet" },
