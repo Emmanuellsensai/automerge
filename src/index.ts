@@ -21,6 +21,8 @@ export type Env = {
   ANTHROPIC_MODEL?: string;
   SWEEP_INTERVAL_MINUTES?: string;
   SWEEP_MAX_PRS?: string;
+  MAX_REPOS?: string;
+  MAX_REPOS_PER_USER?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();

@@ -1,5 +1,5 @@
 import type { Env } from "../../index";
-import { deleteRepo, getRepo, getUser, listReposFor, putRepo, setInstallation, upsertUser } from "../../kv/config";
+import { deleteRepo, getRepo, getUser, listAllRepos, listReposFor, putRepo, setInstallation, upsertUser } from "../../kv/config";
 import { getInstallationForRepo } from "../../github/app";
 import { ephemeral } from "../interactions";
 import { parseRepo, REPO_HINT } from "../parse-repo";
@@ -41,6 +41,31 @@ export async function runRepo(env: Env, ctx: CommandContext) {
           "**Fix:** run `/connect`, click the link, tick this repo, press Install, then run this command again.",
       );
     }
+
+    // Capacity guard for the shared, free-tier instance. Only applies to brand-new repos;
+    // re-adding a repo you already manage always works.
+    const existing = await getRepo(env, slug.owner, slug.repo);
+    if (existing && existing.discordUserId !== ctx.userId) {
+      return ephemeral(`**${slug.owner}/${slug.repo}** is already managed by someone else on this AutoMerge instance.`);
+    }
+    if (!existing) {
+      const perUserCap = Number(env.MAX_REPOS_PER_USER) || 5;
+      const globalCap = Number(env.MAX_REPOS) || 40;
+      const [mine, all] = await Promise.all([listReposFor(env, ctx.userId), listAllRepos(env)]);
+      if (mine.length >= perUserCap) {
+        return ephemeral(
+          `You're already watching ${mine.length} repos, which is the per-maintainer limit on this shared instance. ` +
+            "Remove one with `/repo remove` first, or self-host your own AutoMerge for more.",
+        );
+      }
+      if (all.length >= globalCap) {
+        return ephemeral(
+          "This shared AutoMerge instance is at capacity right now, so I can't add another repo. " +
+            "Please try again later, or self-host your own instance (see the README).",
+        );
+      }
+    }
+
     await putRepo(env, {
       owner: slug.owner,
       repo: slug.repo,

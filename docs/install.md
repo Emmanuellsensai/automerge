@@ -2,7 +2,9 @@
 
 AutoMerge reads every pull request (PR) on your GitHub repo, checks it with Google Gemini, and posts one comment telling the contributor exactly what to fix. When a PR passes every check, it can merge it for you.
 
-**Time needed: about 5 minutes. No coding.**
+**Time needed: about 5 minutes. No coding.** You use the shared, hosted bot and set it all up inside Discord. You never need a Cloudflare account or a terminal. The only thing you provide is your own AI key (below).
+
+The shared bot is free and looks after a limited number of repos in total, up to 5 per person. If it is ever full, `/repo add` will tell you, and you can run your own copy instead (that part is technical; see the README).
 
 ## Before you start
 

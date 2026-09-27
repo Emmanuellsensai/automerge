@@ -19,6 +19,9 @@ ANTHROPIC_MODEL = "claude-haiku-4-5"
 # at most 2 PRs that are new, changed, or waiting on CI. Raise slowly to stay under rate limits.
 SWEEP_INTERVAL_MINUTES = "5"
 SWEEP_MAX_PRS = "2"
+# Shared free-tier capacity guard. Raise these if you enable Cloudflare paid tiers.
+MAX_REPOS = "40"
+MAX_REPOS_PER_USER = "5"
 
 # D1 database — create with:
 #   npx wrangler d1 create automerge

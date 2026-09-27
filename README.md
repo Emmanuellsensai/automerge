@@ -53,15 +53,26 @@ Only when **all** of these are true:
 
 Draft PRs are never reviewed.
 
-## Cost
+## What you pay for
 
-You use your own Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). Google offers a free tier with daily limits and paid usage beyond that; check [Google's pricing page](https://ai.google.dev/pricing) for current numbers, since they change.
+The only thing you pay for is your **own AI usage**:
 
-Optionally add an Anthropic API key as a backup. It is only used when Gemini returns a rate-limit, quota, or overload error, or times out; you pay Anthropic only for those reviews.
+* A **Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey). Google has a free tier with daily limits; check [Google's pricing](https://ai.google.dev/pricing) for current numbers, since they change.
+* Optionally an **Anthropic (Claude) key** as a backup, used only when Gemini is rate-limited or out of quota. You pay Anthropic only for those reviews.
 
-To keep usage low, the AI is called **at most once per commit**. PRs that fail the basic checks (no linked issue, not assigned, dependency or scope problems) never call Gemini at all.
+To keep this low, the AI is called **at most once per commit**, and PRs that fail the basic checks (no linked issue, not assigned, dependency or scope problems) never call the AI at all.
 
-The bot itself runs on the Cloudflare Workers free tier.
+Everything else, the bot's hosting, runs on the maintainer's Cloudflare account, not yours.
+
+## Using the shared bot vs. running your own
+
+**Most people should just use the shared bot.** The buttons above add the hosted AutoMerge to your Discord and GitHub. You set it up entirely in Discord (paste your AI key, connect your repo) and never touch Cloudflare or a terminal. Because it is a shared, free-tier service, it manages a limited number of repos in total, and up to 5 per maintainer. If it is ever full it will say so.
+
+**Run your own only if** you need more repos than the shared limit, or you want full control. That needs a Cloudflare account and a few terminal commands (see [Self-host](#self-host)).
+
+## Tip: keep your API key private
+
+`/setup` responses are only visible to you, so others in the channel never see your key or the bot's reply. If the bot's owner has enabled direct messages for it, you can also run the personal commands (`/setup`, `/status`, `/repo`, and so on) in a DM to the bot. `/watch_claims` is the only command that must be run in a server channel.
 
 ## Slash commands
 
