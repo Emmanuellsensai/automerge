@@ -40,6 +40,7 @@ export type PRReviewState = {
   message?: string;
   cachedVerdict?: "approve" | "request_changes" | "comment";
   cachedForIssue?: number;
+  cachedForIssues?: string;
   cachedReview?: string;
   cachedAddressesIssue?: boolean;
   cachedCommentPosted?: boolean;
@@ -201,6 +202,7 @@ const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
   "cachedAddressesIssue",
   "cachedCommentPosted",
   "cachedForIssue",
+  "cachedForIssues",
   "cachedReview",
 ];
 

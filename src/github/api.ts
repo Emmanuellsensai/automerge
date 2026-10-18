@@ -106,6 +106,24 @@ export async function getCheckRuns(
   return r.json();
 }
 
+// Annotations are the per-line errors a check attached (lint findings, failed assertions, etc.).
+// They are the most specific thing we can show a contributor without downloading raw logs.
+export async function getCheckRunAnnotations(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+): Promise<{ path: string; start_line: number | null; annotation_level: string | null; message: string | null; title: string | null }[]> {
+  const r = await ghFetch(
+    env,
+    installationId,
+    `/repos/${owner}/${repo}/check-runs/${checkRunId}/annotations?per_page=20`,
+  );
+  if (!r.ok) return [];
+  return r.json();
+}
+
 export async function getIssue(
   env: Env,
   installationId: number,

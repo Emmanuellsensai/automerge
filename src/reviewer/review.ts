@@ -1,6 +1,7 @@
 import type { Env } from "../index";
 import {
   approveWorkflowRun,
+  getCheckRunAnnotations,
   getCheckRuns,
   getCombinedStatus,
   getIssue,
@@ -73,17 +74,35 @@ const DEPENDENCY_MANIFESTS = [
 
 type ChangedFile = { filename: string; status: string };
 
-function detectLinkedIssue(pr: PR, owner: string, repo: string): number | null {
+// A PR may close several issues at once ("Closes #12\nCloses #15"). We collect every one
+// so the assignment and scope gates consider all of them, not just the first.
+function detectLinkedIssues(pr: PR, owner: string, repo: string): number[] {
   const text = `${pr.title}\n${pr.body ?? ""}`;
   const kw = "(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)";
-  const short = text.match(new RegExp(`${kw}:?\\s+#(\\d+)`, "i"));
-  if (short) return Number(short[1]);
-  const url = text.match(new RegExp(`${kw}:?\\s+https?://github\\.com/([^/\\s]+)/([^/\\s]+)/issues/(\\d+)`, "i"));
-  if (url && url[1]!.toLowerCase() === owner.toLowerCase() && url[2]!.toLowerCase() === repo.toLowerCase()) {
-    return Number(url[3]);
+  const found = new Set<number>();
+  for (const m of text.matchAll(new RegExp(`${kw}:?\\s+#(\\d+)`, "gi"))) {
+    const num = Number(m[1]);
+    if (Number.isFinite(num) && num > 0) found.add(num);
   }
-  return null;
+  for (const m of text.matchAll(
+    new RegExp(`${kw}:?\\s+https?://github\\.com/([^/\\s]+)/([^/\\s]+)/issues/(\\d+)`, "gi"),
+  )) {
+    if (m[1]!.toLowerCase() === owner.toLowerCase() && m[2]!.toLowerCase() === repo.toLowerCase()) {
+      const num = Number(m[3]);
+      if (Number.isFinite(num) && num > 0) found.add(num);
+    }
+  }
+  return [...found];
 }
+
+type LinkedIssue = {
+  number: number;
+  title: string;
+  body: string | null;
+  labels: { name: string }[];
+  assignees: { login: string }[];
+  state: string;
+};
 
 function extractIssueScopePaths(issueBody: string | null): string[] {
   if (!issueBody) return [];
@@ -111,11 +130,16 @@ function outOfScopeFiles(changed: ChangedFile[], scope: string[]): ChangedFile[]
   });
 }
 
+type FailingCheck = { name: string; url?: string; detail?: string; errors: string[] };
 type CiResult = {
   state: "passing" | "failing" | "pending" | "none";
-  failing: { name: string; url?: string; detail?: string }[];
+  failing: FailingCheck[];
   pending: string[];
 };
+
+function cleanLine(s: string | null | undefined): string {
+  return (s ?? "").replace(/\s+/g, " ").trim();
+}
 
 async function ciStatusOn(env: Env, installationId: number, owner: string, repo: string, sha: string): Promise<CiResult> {
   const [status, checks] = await Promise.all([
@@ -132,13 +156,38 @@ async function ciStatusOn(env: Env, installationId: number, owner: string, repo:
   }
   const runs = [...latest.values()];
 
-  const failing: CiResult["failing"] = [
+  const failingRuns = runs.filter(
+    (c) => c.conclusion === "failure" || c.conclusion === "cancelled" || c.conclusion === "timed_out" || c.conclusion === "action_required",
+  );
+
+  // Pull the per-line errors for the first couple of failing checks, so the comment names the
+  // exact file, line, and message instead of "scroll to the first red line". Bounded to keep
+  // the request count low on the free tier.
+  const annById = new Map<number, string[]>();
+  for (const c of failingRuns.slice(0, 2)) {
+    const anns = await getCheckRunAnnotations(env, installationId, owner, repo, c.id).catch(() => []);
+    const lines = anns
+      .filter((a) => (a.annotation_level ?? "") !== "notice")
+      .slice(0, 4)
+      .map((a) => {
+        const where = a.path && a.path !== ".github" ? `${a.path}${a.start_line ? `:${a.start_line}` : ""}` : "";
+        const msg = cleanLine(a.message || a.title).slice(0, 220);
+        return where ? `\`${where}\` — ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (lines.length) annById.set(c.id, lines);
+  }
+
+  const failing: FailingCheck[] = [
     ...statuses
       .filter((s) => s.state === "failure" || s.state === "error")
-      .map((s) => ({ name: s.context, url: s.target_url ?? undefined, detail: s.description ?? undefined })),
-    ...runs
-      .filter((c) => c.conclusion === "failure" || c.conclusion === "cancelled" || c.conclusion === "timed_out" || c.conclusion === "action_required")
-      .map((c) => ({ name: c.name, url: c.html_url ?? c.details_url ?? undefined, detail: c.output?.title ?? undefined })),
+      .map((s) => ({ name: s.context, url: s.target_url ?? undefined, detail: cleanLine(s.description) || undefined, errors: [] })),
+    ...failingRuns.map((c) => ({
+      name: c.name,
+      url: c.html_url ?? c.details_url ?? undefined,
+      detail: cleanLine(c.output?.title) || undefined,
+      errors: annById.get(c.id) ?? (cleanLine(c.output?.summary) ? [cleanLine(c.output?.summary).slice(0, 300)] : []),
+    })),
   ];
   const pending = [
     ...statuses.filter((s) => s.state === "pending").map((s) => s.context),
@@ -332,7 +381,7 @@ async function reviewOne(
         message: headline,
         cachedVerdict: prev?.lastCommitSha === pr.head.sha ? prev.cachedVerdict : undefined,
         cachedAddressesIssue: prev?.lastCommitSha === pr.head.sha ? prev.cachedAddressesIssue : undefined,
-        cachedForIssue: prev?.lastCommitSha === pr.head.sha ? prev.cachedForIssue : undefined,
+        cachedForIssues: prev?.lastCommitSha === pr.head.sha ? prev.cachedForIssues : undefined,
         cachedReview: prev?.lastCommitSha === pr.head.sha ? prev.cachedReview : undefined,
         ...extra,
       },
@@ -341,47 +390,64 @@ async function reviewOne(
     return { number: n, status, headline, steps: steps.map((s) => s.title), url: pr.html_url };
   };
 
-  // ---- gate 1: linked issue + assignment (identity gates; no LLM spend) ----
-  const issueN = detectLinkedIssue(pr, owner, repo);
-  const issue = issueN ? await getIssue(env, installationId, owner, repo, issueN).catch(() => null) : null;
-  const assignees = (issue?.assignees ?? []).map((x) => x.login);
-  const isAssigned = assignees.some((x) => x.toLowerCase() === login.toLowerCase());
+  // ---- gate 1: linked issue(s) + assignment (identity gates; no LLM spend) ----
+  // A PR may close several issues. The author must be assigned to EVERY one it closes.
+  const issueNums = detectLinkedIssues(pr, owner, repo);
+  const fetched = await Promise.all(
+    issueNums.map((num) => getIssue(env, installationId, owner, repo, num).catch(() => null)),
+  );
+  const issues = fetched.filter((x): x is LinkedIssue => x !== null);
+  const isMine = (iss: LinkedIssue) => iss.assignees.some((x) => x.login.toLowerCase() === login.toLowerCase());
+  const issuesLabel = issues.map((i) => `#${i.number}`).join(", ");
 
-  if (!issueN) {
+  if (issueNums.length === 0) {
     gates.push({ name: "Linked issue", mark: "fail", note: "none found" });
     steps.push({
       title: "Link the issue this PR solves.",
       detail:
         "Edit this PR's description and add a line with the issue number you were assigned, exactly like this:\n\n" +
         "```\nCloses #123\n```\n" +
-        "Replace `123` with your issue number. `Fixes #123` and `Resolves #123` also work.",
+        "Replace `123` with your issue number. `Fixes #123` and `Resolves #123` also work. If this PR solves more than one issue, add one `Closes #N` line for each.",
     });
-  } else if (!issue) {
-    gates.push({ name: "Linked issue", mark: "fail", note: `#${issueN} not readable` });
+  } else if (issues.length === 0) {
+    gates.push({ name: "Linked issue", mark: "fail", note: `${issueNums.map((x) => "#" + x).join(", ")} not readable` });
     steps.push({
-      title: `Fix the issue reference: I can't read #${issueN} in ${owner}/${repo}.`,
-      detail: `Make sure #${issueN} is an issue (not a pull request) in this repository, then update the \`Closes #N\` line in the PR description.`,
+      title: `Fix the issue reference: I can't read ${issueNums.map((x) => "#" + x).join(", ")} in ${owner}/${repo}.`,
+      detail: `Make sure each number is an issue (not a pull request) in this repository, then update the \`Closes #N\` line(s) in the PR description.`,
     });
   } else {
-    gates.push({ name: "Linked issue", mark: "pass", note: `#${issue.number}` });
-    if (assignees.length === 0) {
-      gates.push({ name: "Assigned to PR author", mark: "fail", note: "issue has no assignee" });
-      steps.push({
-        title: `Get assigned to #${issue.number}.`,
-        detail:
-          `Only the assigned contributor's PR can be merged. Comment on #${issue.number} asking a maintainer to assign you ` +
-          "(or claim it in the project's Discord if claims are enabled there). Once you are assigned, edit this PR's description (any small change) and I will re-check.",
-      });
-    } else if (!isAssigned) {
-      gates.push({ name: "Assigned to PR author", mark: "fail", note: `assigned to ${assignees.map((x) => "@" + x).join(", ")}` });
-      steps.push({
-        title: `#${issue.number} is assigned to ${assignees.map((x) => "@" + x).join(", ")}, not you.`,
-        detail:
-          "Only the assignee's PR can be merged for this issue. If you are taking it over, ask a maintainer on the issue to reassign it to you. " +
-          "Otherwise, pick an unassigned issue and open a new PR for it.",
-      });
+    gates.push({ name: issues.length > 1 ? "Linked issues" : "Linked issue", mark: "pass", note: issuesLabel });
+    const unassigned = issues.filter((iss) => !isMine(iss));
+    if (unassigned.length === 0) {
+      gates.push({ name: "Assigned to PR author", mark: "pass", note: `@${login} on ${issuesLabel}` });
     } else {
-      gates.push({ name: "Assigned to PR author", mark: "pass", note: `@${login}` });
+      gates.push({
+        name: "Assigned to PR author",
+        mark: "fail",
+        note:
+          issues.length > 1
+            ? `not assigned to ${unassigned.map((i) => "#" + i.number).join(", ")}`
+            : unassigned[0]!.assignees.length === 0
+            ? "issue has no assignee"
+            : `assigned to ${unassigned[0]!.assignees.map((a) => "@" + a.login).join(", ")}`,
+      });
+      const lines = unassigned.map((iss) =>
+        iss.assignees.length === 0
+          ? `- **#${iss.number}** has no assignee.`
+          : `- **#${iss.number}** is assigned to ${iss.assignees.map((a) => "@" + a.login).join(", ")}, not you.`,
+      );
+      steps.push({
+        title:
+          issues.length > 1
+            ? `You must be assigned to every issue this PR closes. You're not assigned to ${unassigned.map((i) => "#" + i.number).join(", ")}.`
+            : unassigned[0]!.assignees.length === 0
+            ? `Get assigned to #${unassigned[0]!.number}.`
+            : `#${unassigned[0]!.number} is assigned to ${unassigned[0]!.assignees.map((a) => "@" + a.login).join(", ")}, not you.`,
+        detail:
+          lines.join("\n") +
+          "\n\nOnly the assigned contributor's PR can be merged for an issue. Ask a maintainer to assign you on each one above (or claim it in the project's Discord if claims are enabled there). " +
+          "Once you're assigned, edit this PR's description (any small change) and I'll re-check. If you only meant to solve one issue, remove the extra `Closes #N` line(s).",
+      });
     }
   }
 
@@ -418,7 +484,9 @@ async function reviewOne(
     return finish("blocked", "AutoMerge: nothing left to merge in this PR", "this PR's changes already appear to be on the base branch.");
   }
   const depHits = changed.filter((f) => DEPENDENCY_MANIFESTS.some((r) => r.test(f.filename)));
-  const scope = extractIssueScopePaths(issue!.body);
+  // Scope is the union of file paths named across every linked issue, so a PR that legitimately
+  // closes two issues can touch the files from both without being flagged as out of scope.
+  const scope = [...new Set(issues.flatMap((iss) => extractIssueScopePaths(iss.body)))];
   // If no changed file matches anything the issue names, those names were probably not file
   // paths (or the issue lists no real scope); leave scope to the AI review instead of
   // declaring the whole PR out of scope.
@@ -445,11 +513,11 @@ async function reviewOne(
 
   if (outside.length) {
     const shown = outside.slice(0, 15);
-    gates.push({ name: "Only touches files the issue covers", mark: "fail", note: `${outside.length} file(s) outside #${issue!.number}` });
+    gates.push({ name: "Only touches files the issue covers", mark: "fail", note: `${outside.length} file(s) outside ${issuesLabel}` });
     steps.push({
-      title: `Keep the PR inside the scope of #${issue!.number}.`,
+      title: `Keep the PR inside the scope of ${issuesLabel}.`,
       detail:
-        `The issue covers ${scope.map((p) => "`" + p + "`").join(", ")}, but this PR also changes:\n` +
+        `${issues.length > 1 ? "The linked issues cover" : "The issue covers"} ${scope.map((p) => "`" + p + "`").join(", ")}, but this PR also changes:\n` +
         shown.map((f) => `- \`${f.filename}\``).join("\n") +
         (outside.length > shown.length ? `\n- ...and ${outside.length - shown.length} more` : "") +
         "\n\nRevert those files (tests and docs are always allowed). If they really need to change, ask a maintainer to add them to the issue.",
@@ -474,12 +542,21 @@ async function reviewOne(
     gates.push({ name: "Merge conflicts", mark: "fail", note: `conflicts with \`${base}\`` });
     steps.push({
       title: `Resolve the merge conflicts with \`${base}\`.`,
-      detail: `Someone changed the same lines on \`${base}\` after you started. Pull in their changes, pick the right version of each conflicting part, then push. (Or use the **Resolve conflicts** button on this PR page if GitHub shows one.)`,
+      detail:
+        `Someone changed the same lines on \`${base}\` after you started, so Git can't combine the two automatically. ` +
+        `Run the commands below. The \`git merge\` step prints one line per clashing file, like \`CONFLICT (content): Merge conflict in path/to/file\` — those are the exact files to open. ` +
+        "In each one, find the `<<<<<<<`, `=======`, `>>>>>>>` markers, keep the correct code, delete the markers, then finish the steps.\n\n" +
+        "Prefer a button? GitHub's **Resolve conflicts** button on this PR page does the same thing in your browser.",
       commands: syncCommands(
         owner,
         repo,
         base,
-        `git merge upstream/${base}\n# open each conflicted file, keep the correct code, remove the <<<<<<< ======= >>>>>>> markers\ngit add -A\ngit commit`,
+        `git checkout ${pr.head.ref}\n` +
+          `git merge upstream/${base}\n` +
+          `# Git lists each conflicted file as "CONFLICT ... in <file>".\n` +
+          `# Open each one, keep the right code, remove the <<<<<<< ======= >>>>>>> markers, then:\n` +
+          `git add -A\n` +
+          `git commit --no-edit`,
       ),
     });
   } else {
@@ -491,14 +568,22 @@ async function reviewOne(
     : await ciStatusOn(env, installationId, owner, repo, pr.head.sha);
   if (ci.state === "failing") {
     gates.push({ name: "Automatic tests (CI)", mark: "fail", note: ci.failing.map((f) => f.name).join(", ") });
+    const body = ci.failing
+      .slice(0, 6)
+      .map((f) => {
+        const head = `- **${f.name}**${f.detail ? `: ${f.detail}` : ""}${f.url ? ` ([open the full log](${f.url}))` : ""}`;
+        const errs = f.errors.slice(0, 4).map((e) => indent(`- ${e}`, 2)).join("\n");
+        return errs ? `${head}\n${errs}` : head;
+      })
+      .join("\n");
+    const hasErrors = ci.failing.some((f) => f.errors.length);
     steps.push({
-      title: `Fix the failing automatic test${ci.failing.length > 1 ? "s" : ""} (CI).`,
+      title: `Fix the failing check${ci.failing.length > 1 ? "s" : ""} (CI).`,
       detail:
-        ci.failing
-          .slice(0, 10)
-          .map((f) => `- **${f.name}**${f.detail ? `: ${f.detail}` : ""}${f.url ? ` ([open the log](${f.url}))` : ""}`)
-          .join("\n") +
-        "\n\nClick each log link and scroll to the first red error line. It usually names the file and the problem. Run the same command on your machine, fix it, and push. Please don't skip or delete tests to make them pass.",
+        body +
+        (hasErrors
+          ? "\n\nEach line above is the exact error the check reported, with the file and line where it can. Fix those, run the same check on your machine to confirm it passes, then push. Please don't skip or delete tests to make them pass."
+          : "\n\nOpen the log link above and read the first red error. Run the same command on your machine, fix what it reports, then push. Please don't skip or delete tests to make them pass."),
     });
   } else if (ci.state === "pending") {
     gates.push({ name: "Automatic tests (CI)", mark: "wait", note: `running: ${ci.pending.slice(0, 5).join(", ")}` });
@@ -506,22 +591,33 @@ async function reviewOne(
     gates.push({ name: "Automatic tests (CI)", mark: "pass", note: ci.state === "none" ? "no checks configured" : "passing" });
   }
 
-  // ---- gate 4: Gemini review (once per head SHA + linked issue) ----
+  // ---- gate 4: AI review (once per head SHA + linked-issue set) ----
+  const issueSetKey = issues.map((i) => i.number).sort((x, y) => x - y).join(",");
   let review: ReviewJSON;
   const cachedOk =
     !a.freshAi &&
     !!prev &&
     prev.lastCommitSha === pr.head.sha &&
-    prev.cachedForIssue === issue!.number &&
+    prev.cachedForIssues === issueSetKey &&
     !!prev.cachedReview;
   if (cachedOk) {
     review = JSON.parse(prev!.cachedReview!) as ReviewJSON;
   } else {
     const rawDiff = await getPRDiff(env, installationId, owner, repo, n);
     const diff = rawDiff.length > DIFF_MAX_CHARS ? rawDiff.slice(0, DIFF_MAX_CHARS) + "\n... [diff truncated]" : rawDiff;
+    const issueBlocks = issues
+      .map(
+        (iss) =>
+          `<issue>\n#${iss.number}: ${iss.title}\nLabels: ${iss.labels.map((l) => l.name).join(", ") || "(none)"}\n${iss.body ?? "(empty)"}\n</issue>`,
+      )
+      .join("\n\n");
+    const multiNote =
+      issues.length > 1
+        ? `\nNote: this PR legitimately closes ${issues.length} issues (${issuesLabel}). Treat work for any of them as in scope; judge it against all of them together.`
+        : "";
     const userPrompt = [
-      `<pr>\nRepository: ${owner}/${repo}\nPR #${n} by @${login}\nTitle: ${pr.title}\nDescription:\n${pr.body ?? "(empty)"}\n</pr>`,
-      `<issue>\n#${issue!.number}: ${issue!.title}\nLabels: ${issue!.labels.map((l) => l.name).join(", ") || "(none)"}\n${issue!.body ?? "(empty)"}\n</issue>`,
+      `<pr>\nRepository: ${owner}/${repo}\nPR #${n} by @${login}\nTitle: ${pr.title}\nDescription:\n${pr.body ?? "(empty)"}\n</pr>${multiNote}`,
+      issueBlocks,
       `<files>\n${changed.map((f) => `${f.status}\t${f.filename}`).join("\n")}\n</files>`,
       `<diff>\n${diff}\n</diff>`,
     ].join("\n\n");
@@ -550,7 +646,7 @@ async function reviewOne(
   const cacheFields: Partial<PRReviewState> = {
     cachedVerdict: approved ? "approve" : "request_changes",
     cachedAddressesIssue: review.addresses_issue,
-    cachedForIssue: issue!.number,
+    cachedForIssues: issueSetKey,
     cachedReview: JSON.stringify(review),
     lastCiConclusion: ci.state,
   };
