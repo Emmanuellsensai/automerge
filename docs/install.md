@@ -1,207 +1,187 @@
-# Install AutoMerge
+# Set up AutoMerge
 
-AutoMerge is a Discord bot and GitHub App that reads every pull request opened on your repository, cross-references it against the linked issue, checks CI, and either posts review feedback or squash-merges the PR when it is clean. Reviews run on Claude Haiku 4.5, paid by your Anthropic API key.
+AutoMerge reads every pull request (PR) on your GitHub repo, checks it with Google Gemini, and posts one comment telling the contributor exactly what to fix. When a PR passes every check, it can merge it for you.
 
-**Time to set up: about 5 minutes.**
+**Time needed: about 5 minutes. No coding.** You use the shared, hosted bot and set it all up inside Discord. You never need a Cloudflare account or a terminal. The only thing you provide is your own AI key (below).
 
-## What you need
+The shared bot is free and looks after a limited number of repos in total, up to 5 per person. If it is ever full, `/repo add` will tell you, and you can run your own copy instead (that part is technical; see the README).
 
-* **A Discord server you own** (or a channel where you can invite the bot).
-* **The GitHub repo or org you want managed.** You must be an **Owner** on a personal repo or an **Admin** on an org.
-* **An Anthropic API key.** Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys). Cost is about **$0.007 per PR review**. Mechanical rejections cost $0. $5 is enough for hundreds of reviews.
+## Before you start
 
-## 1. Add the bot to your Discord server
+You need:
 
-Open the invite link:
+* **A Discord server** where you can add bots (you own it, or you have "Manage Server").
+* **A GitHub repo you manage.** You must be the owner of a personal repo, or an admin of an organization's repo.
+* **A Google account**, to get a free Gemini API key.
 
-> **[Install AutoMerge on Discord](https://discord.com/oauth2/authorize?client_id=1552301499139493888&scope=applications.commands+bot)**
+A few words you'll see:
 
-Discord will ask you to pick a server. Click **Authorize**. That is it. No permissions to configure.
+* **Pull request (PR):** someone's proposed change to your code.
+* **Issue:** a task or bug report on GitHub. Each PR should say which issue it solves.
+* **CI / automatic tests:** the checks GitHub runs on every PR (the green ticks or red crosses).
+* **API key:** a password-like code that lets AutoMerge use Gemini on your behalf.
 
-## 2. Install the GitHub App on your repo
+## Step 1: Add the bot to Discord
 
-Open:
+1. Open **[this invite link](https://discord.com/oauth2/authorize?client_id=1552301499139493888&scope=applications.commands+bot)**.
+2. Pick your server and click **Authorize**.
 
-> **[Install AutoMerge on GitHub](https://github.com/apps/automerge-wave)**
+Type `/help` in any channel. If AutoMerge answers, it's in.
 
-Click **Install** at the top-right. On the next screen:
+## Step 2: Get a Gemini API key
 
-* **Choose the account.** Your personal account, or the org that owns the repo.
-* **Only select repositories.** Tick the repos you want managed. You can add more later.
-* Click **Install**.
+1. Go to **[aistudio.google.com/apikey](https://aistudio.google.com/apikey)** and sign in with Google.
+2. Click **Create API key** and copy it. It usually starts with `AIza`.
+3. In Discord, type `/setup`, paste the key into the box, and press Enter.
 
-You will bounce back to `github.com/settings/installations` showing the installation. Done.
+AutoMerge checks the key with Google right away. If it says the key isn't valid, copy it again and retry.
 
-## 3. Give the bot your Anthropic API key
+**Optional backup key.** Gemini's free tier has rate limits. If you also add an Anthropic key, AutoMerge switches to Claude only when Gemini is rate-limited, out of quota, or overloaded, so reviews never stall. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
 
-In your Discord server, in any channel where the bot can post:
+Your key is encrypted before it is saved and is only used to review your PRs. Keep it private: don't paste it anywhere else in the chat.
 
-```
-/setup anthropic_api_key:sk-ant-api03-...
-```
+## Step 3: Give AutoMerge access to your repo
 
-Get the key at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys). Anthropic keys start with `sk-ant-`. Enable billing on your Anthropic account (or use the free credit) so the key can actually make calls.
+1. In Discord, type `/connect` and open the link it gives you.
+2. Pick your account or organization.
+3. Choose **Only select repositories**, tick the repo(s) you want, and press **Install**.
+4. Back in Discord, type `/repo add` and paste your repo's GitHub link (for example `https://github.com/sorolens/sorolens`).
 
-**The key is encrypted with AES-GCM before being stored.** It is used only to review your PRs.
+## Step 4: Check everything worked
 
-## 4. Tell AutoMerge which repos to manage
-
-```
-/repo add slug:<owner>/<repo>
-```
-
-Repeat for every repo you want managed. Verify:
-
-```
-/status
-```
-
-You should see:
+Type `/status`. You'll see a checklist like this:
 
 ```
-AutoMerge status
-- Anthropic key: linked
-- GitHub installation: #12345
-- Processing: on
-- Auto-merge: on
-- Managed repos: 1
-  * yourname/yourrepo
+AutoMerge setup checklist
+✅ 1. Gemini API key saved (/setup)
+✅ 2. GitHub App installed and repo added (/connect, then /repo add)
+⬜ 3. Auto-merge turned on (optional, /config auto_merge)
+
+Next step: you're set up. AutoMerge reviews every PR...
 ```
 
-## 5. Turn on real auto-merge (optional)
+That's it. From now on every new PR gets a review comment.
 
-By default AutoMerge reviews and comments but does not merge. When you are ready:
+## Step 5 (optional): Let AutoMerge merge PRs
+
+By default AutoMerge **only comments**. It never merges until you allow it:
 
 ```
 /config auto_merge value:on
 ```
 
-Change the merge strategy any time:
+Turn it off again any time with `/config auto_merge value:off`. To pause AutoMerge completely, type `/off` (and `/on` to resume).
 
-```
-/config strategy value:squash    # default
-/config strategy value:merge
-/config strategy value:rebase
-```
+## What contributors see
+
+Each PR gets **one** comment that updates itself on every push. It lists exactly what to do, in order. For example:
+
+> **AutoMerge: changes needed before this can merge**
+>
+> @xtep103 Close, but a couple of things are off.
+>
+> **What to do to get this merged:**
+>
+> 1. **Fix the failing automatic test (CI).** test: 2 tests failed (open the log)
+> 2. **The issue asks for something this PR doesn't do yet:** show "No activity" when a contract has no events.
+> 3. **`src/contracts.ts:12`: `ledger_closed_at` is parsed as local time.** Fix: use `new Date(row.ledger_closed_at).toISOString()`.
+
+For problems like merge conflicts or extra files, the comment includes the exact commands to copy and paste. A collapsible **Merge gate status** table at the bottom shows which checks passed.
+
+Contributors don't need to ask anyone for a re-review. AutoMerge re-checks on every push and whenever the PR description is edited.
+
+AutoMerge also looks over your open PRs in the background every 5 minutes, a couple at a time, so nothing gets stuck if GitHub drops a notification or the AI was busy. When you first add a repo, it works through the PRs that are already open at that pace (about 24 per hour). PRs that haven't changed are re-checked only every 6 hours and are never sent to the AI again. Maintainers can change the pace with `SWEEP_INTERVAL_MINUTES` and `SWEEP_MAX_PRS` in `wrangler.toml`.
+
+## When does AutoMerge merge a PR?
+
+Only when **all** of these are true:
+
+1. **The PR names its issue.** The description has a line like `Closes #123`.
+2. **The PR author is assigned to that issue** on GitHub.
+3. **No dependency files changed** (`package.json`, lockfiles, `go.mod`, `Cargo.toml`, `requirements.txt`, and similar). Adding a dependency is a decision for a human.
+4. **Only files the issue covers are changed.** If the issue mentions file paths in backticks (like `` `src/api/handler.go` ``), the PR may only change those. Tests and docs are always allowed. If the issue names no paths, this check is skipped.
+5. **No merge conflicts.**
+6. **Automatic tests (CI) pass.** Preview-deploy checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored.
+7. **The AI review approves** (Gemini, or Claude if Gemini was busy) and confirms the PR solves the issue.
+8. **You turned auto-merge on** (Step 5).
+
+Checks 1 to 4 are free. The AI is only asked when they pass, and at most once per commit.
+
+**Tip for maintainers:** write file paths in backticks in your issues. It keeps contributors focused and makes check 4 work.
 
 ## Every command
 
 | Command | What it does |
 |---|---|
-| `/setup anthropic_api_key:<key>` | Save your Anthropic API key (encrypted). |
-| `/connect` | Get the GitHub App install link. |
-| `/repo add slug:<owner/repo>` | Start managing a repo. |
-| `/repo remove slug:<owner/repo>` | Stop managing a repo. |
-| `/repo list` | Show managed repos. |
-| `/on` and `/off` | Resume or pause automatic processing. |
-| `/status` | Show config, installation, and repo count. |
-| `/check slug:<owner/repo> [pr:<n>]` | Trigger a review right now. Dry-run friendly. |
-| `/config auto_merge value:<on\|off>` | Allow AutoMerge to press Merge. |
-| `/config strategy value:<squash\|merge\|rebase>` | How to merge. |
-| `/help` | Show the command list. |
+| `/help` | How AutoMerge works and how to set it up. |
+| `/status` | Your setup checklist and the next step. |
+| `/setup` | Save your Gemini API key. |
+| `/connect` | Get the link to install AutoMerge on your repo. |
+| `/repo add` | Start watching a repo (paste its GitHub link). |
+| `/repo remove` | Stop watching a repo. Nothing on GitHub changes. |
+| `/repo list` | See which repos AutoMerge watches. |
+| `/check` | Review a PR right now. Paste the PR link; the result shows in Discord. |
+| `/config auto_merge` | Let AutoMerge merge PRs that pass (on/off). |
+| `/config strategy` | How PRs are merged. **Squash** (recommended) turns a PR into one tidy commit. |
+| `/on` and `/off` | Resume or pause AutoMerge. |
+| `/watch_claims` | Let people claim issues in a Discord channel (see below). |
+| `/link_github` | Contributors connect their GitHub account so they can claim issues. |
 
-## The strict gate rule
+## Issue claims from Discord (optional)
 
-AutoMerge merges a PR only when **all** of these are true. Cheaper mechanical gates are checked first, so bad PRs never call Claude.
+If people pick issues by posting in Discord ("I'll take #168"), AutoMerge can assign them on GitHub automatically. The first person to post an issue number or link gets it.
 
-### Mechanical gates (no Claude spend)
+**For the maintainer:**
 
-1. **Linked issue exists** (`Closes #N` in the PR body) and the bot can read it.
-2. **PR author is an official assignee** of the linked issue.
-3. **No dependency-manifest changes.** `package.json`, `pnpm-lock.yaml`, `go.mod`, `Cargo.toml`, `requirements.txt`, and eight other manifest files are treated as policy decisions and always need a human.
-4. **Every changed file is in scope.** File paths named in backticks inside the linked issue body are the scope. Tests (`*_test.go`, `*.test.ts`, `*.spec.tsx`, etc.) and docs (`docs/*`, `*.md`) are always allowed.
-5. **CI on the head commit is passing.** Missing, pending, or failing blocks the merge. Preview-deployment checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored because they gate on maintainer approval, not code.
+1. Type `/watch_claims`, pick the channel, and paste your repo's GitHub link.
 
-### Claude review (one call per commit SHA)
+**For each contributor (once):**
 
-6. **Claude verdict is `approve`.** Not `request_changes` or `comment`.
-7. **Claude confirms the PR addresses the linked issue.**
+1. Type `/link_github` and open the link. Approve on GitHub. This tells AutoMerge which GitHub account is yours.
 
-Claude is called **once per commit SHA** and the verdict is cached. Later webhooks on the same commit (CI settling, workflow completions) reuse the cached verdict and cost $0.
+**What happens when someone posts `#168` or an issue link in that channel:**
 
-### Configuration gate
+* ✅ reaction: the issue was free and is now assigned to them on GitHub.
+* ⛔ reaction: someone already has it, or GitHub refused (for example, the person isn't allowed to be assigned in that repo).
+* ❓ reaction: they haven't run `/link_github` yet.
 
-8. **Maintainer has `/config auto_merge value:on`.**
+AutoMerge checks the channel once a minute, so the reaction can take up to a minute to appear.
 
-**Drafts are never approved.** PRs with no `Closes #N` reference are automatically flagged.
+**Requirements:** the GitHub App needs **Issues: Read and write** permission. GitHub can refuse to assign someone who has no connection to the repo. If assignment fails, ask the contributor to leave a comment on the issue first and try again.
 
-## What contributors see
+**Server owners setting this up for the first time** (one-time, technical): create a GitHub OAuth App at `https://github.com/settings/developers` with callback URL `https://automerge.automergewave.workers.dev/github/oauth/callback`, then run `wrangler secret put GITHUB_OAUTH_CLIENT_ID` and `wrangler secret put GITHUB_OAUTH_CLIENT_SECRET`.
 
-**One deduped comment per PR.** AutoMerge posts one comment on the first review and edits that same comment on every subsequent update. Contributors never see a wall of stale reviews.
+## Let first-time contributors' tests run
 
-The comment always tells contributors exactly what to fix, in order:
+On public repos, GitHub holds a first-time contributor's tests until a maintainer clicks "Approve and run". AutoMerge clicks it for you when the contributor is assigned to the linked issue.
 
-* **Missing linked issue** or **not assigned** — one terse note explaining the gate.
-* **Touches a dependency manifest** or **out of scope** — the exact blocking condition and which files triggered it.
-* **CI failing** — wait note.
-* **All gates green** — a friendly review from Claude, followed by an automatic squash-merge.
+This needs the **Actions: Read and write** permission. If you installed AutoMerge before this feature existed:
 
-## Auto-approving first-time contributor workflows
-
-Public GitHub repos gate first-time contributors' workflow runs behind a maintainer click. AutoMerge auto-approves those runs when the contributor is an assignee of the linked issue, so real code CI can execute without you clicking anything.
-
-Grant the GitHub App **Actions: Read and write** permission for this to work. If you installed AutoMerge before this feature shipped, do it now:
-
-1. Go to `https://github.com/settings/apps/automerge-wave/permissions`. Change **Actions** to **Read and write**. Save.
-2. Go to `https://github.com/settings/installations`. Click **Configure** on AutoMerge-wave. Click **Accept new permissions** at the top.
+1. Open `https://github.com/settings/apps/automerge-wave/permissions`, set **Actions** to **Read and write**, and save.
+2. Open `https://github.com/settings/installations`, click **Configure** next to AutoMerge-wave, and click **Accept new permissions**.
 
 ## Troubleshooting
 
-### "Run `/setup` first. I need an Anthropic API key before connecting GitHub."
+**"Step 1 isn't done yet"**: run `/setup` with your Gemini key first.
 
-You skipped step 3. Paste your key with `/setup`.
+**"Google says that key isn't valid"**: copy the key again from [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Make sure you copied all of it.
 
-### "I cannot see `<owner>/<repo>`. Install the AutoMerge GitHub App on it first."
+**"I can't see owner/repo yet"**: the GitHub App isn't installed on that repo. Run `/connect` again and make sure the repo is ticked.
 
-The App is not installed on that repo. Re-run step 2 and make sure the repo is ticked.
+**The bot didn't comment on a PR**: type `/check` and paste the PR link. The answer in Discord tells you what happened. Common reasons: the PR is a draft, AutoMerge is paused (`/on`), or the repo isn't added (`/repo list`).
 
-### Bot posts nothing on a PR
+**"Gemini 429" in a review**: you hit Gemini's rate limit or free-tier quota. Add an Anthropic backup key with `/setup anthropic_api_key:...` so Claude covers these moments, or add billing in Google AI Studio.
 
-Run `/check slug:<owner>/<repo> pr:<n>` in Discord to force a review. Common causes:
+**"The merge was rejected by GitHub"**: usually branch protection. Check the repo's branch rules, or merge by hand.
 
-* **No `Closes #N` in the PR body.** Bot silently defers.
-* **`401 invalid x-api-key`.** Re-check your key with `/setup`, then `/status`.
-* **CI is still pending.** Bot will not merge until it settles.
+**The comment doesn't change**: that's on purpose. AutoMerge edits the same comment each time. Refresh the PR page.
 
-### Bot posts one comment then never updates it
-
-That is the intended behavior. The comment is edited in place on every re-run to keep the PR page clean. Refresh the PR to see the latest text.
-
-### "Auto-merge attempted but got: 405 Method Not Allowed."
-
-The GitHub App installation does not have write access to Contents. Reinstall on the repo and grant the requested permissions.
-
-### First-time contributor workflows still need manual approval
-
-The Actions permission was not granted. See "Auto-approving first-time contributor workflows" above.
-
-### Bot merged the wrong PR
-
-Turn auto-merge off immediately:
-
-```
-/off
-/config auto_merge value:off
-```
-
-Then open an issue on [Emmanuellsensai/automerge](https://github.com/Emmanuellsensai/automerge/issues) with the PR link.
-
-## Cost
-
-Each review calls Claude Haiku 4.5 **once per commit SHA** with the PR diff (capped at 8k characters) plus prompt. Later webhooks on the same commit are free.
-
-* **Typical cost per merged PR:** about $0.007.
-* **Mechanical rejections (missing assignee, out of scope, dep changes):** $0.
-* **$1 covers roughly 150 reviews.**
-
-You pay only for your own API usage. The bot's Cloudflare Worker and KV run on the free tier.
+**AutoMerge merged something it shouldn't have**: turn merging off right away with `/config auto_merge value:off` (or `/off` to pause everything), then open an issue at [Emmanuellsensai/automerge](https://github.com/Emmanuellsensai/automerge/issues) with the PR link.
 
 ## Privacy and security
 
-* **Your Anthropic API key is encrypted** with AES-GCM before being stored in Cloudflare KV. It is decrypted only in memory at the moment a review runs.
-* **GitHub App installation tokens** are minted per request and never cached.
-* **PR code is never checked out.** AutoMerge inspects diffs through the GitHub API only.
-* **Discord webhook signatures** are verified via ed25519 on every interaction.
-* **GitHub webhook signatures** are verified via HMAC-SHA256 on every event.
-* **No PR content, diff, or issue body** is stored on the server past the duration of a single review.
+* **Your API keys are encrypted** (AES-GCM) before they are saved, and decrypted only in memory while a review runs.
+* **Contributor code is never run.** AutoMerge only reads the changes through GitHub's API.
+* **What is stored:** your settings, the repos you watch, and each PR's latest review result (verdict, summary, and fix list) so the same commit is never reviewed twice. Review results expire after 30 days. Code, diffs, and issue text are not stored.
+* **Every message is verified:** Discord messages with ed25519 signatures, GitHub events with HMAC-SHA256.
 * **Source code:** [github.com/Emmanuellsensai/automerge](https://github.com/Emmanuellsensai/automerge).

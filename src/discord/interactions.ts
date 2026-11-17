@@ -9,6 +9,8 @@ import { runStatus } from "./commands/status";
 import { runCheck } from "./commands/check";
 import { runConfig } from "./commands/config";
 import { runHelp } from "./commands/help";
+import { runWatchClaims } from "./commands/watch_claims";
+import { runLinkGithub } from "./commands/link_github";
 
 // Discord interaction types
 const PING = 1;
@@ -55,6 +57,8 @@ const HANDLERS: Record<string, Handler> = {
   status: (env, ctx) => runStatus(env, ctx),
   check: (env, ctx) => runCheck(env, ctx),
   config: (env, ctx) => runConfig(env, ctx),
+  watch_claims: (env, ctx) => runWatchClaims(env, ctx),
+  link_github: (env, ctx) => runLinkGithub(env, ctx),
 };
 
 export async function handleDiscordInteraction(c: Context<{ Bindings: Env }>) {

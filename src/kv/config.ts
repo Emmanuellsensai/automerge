@@ -5,11 +5,17 @@ import type { Env } from "../index";
 //   repo:{owner}/{repo}                 -> RepoConfig
 //   installation:{installationId}       -> discordUserId (string)
 //   pr:{owner}/{repo}/{number}          -> PRReviewState
+//   claim_channel:{guildId}             -> WatchConfig
+//   contributor:{discordUserId}         -> ContributorLink
+//   oauth_state:{state}                 -> discordUserId (short TTL)
+//   last_msg:{channelId}                -> last Discord message id processed
+//   claimed:{owner}/{repo}/{issueN}     -> ClaimRecord
 
 export type UserConfig = {
   discordUserId: string;
   guildId?: string;
   githubInstallationId?: number;
+  geminiKeyCipher?: string;
   anthropicKeyCipher?: string;
   enabled: boolean;
   autoMerge: boolean;
@@ -30,9 +36,12 @@ export type PRReviewState = {
   lastCommitSha: string;
   lastCiConclusion?: string;
   lastReviewAt?: string;
-  status: "queued" | "reviewed" | "merged" | "commented" | "skipped";
+  status: "queued" | "reviewed" | "merged" | "commented" | "skipped" | "blocked";
   message?: string;
   cachedVerdict?: "approve" | "request_changes" | "comment";
+  cachedForIssue?: number;
+  cachedForIssues?: string;
+  cachedReview?: string;
   cachedAddressesIssue?: boolean;
   cachedCommentPosted?: boolean;
 };
@@ -42,6 +51,36 @@ const repoKey = (owner: string, repo: string) => `repo:${owner.toLowerCase()}/${
 const installKey = (id: number) => `installation:${id}`;
 const prKey = (owner: string, repo: string, n: number) =>
   `pr:${owner.toLowerCase()}/${repo.toLowerCase()}/${n}`;
+const watchKey = (guildId: string) => `claim_channel:${guildId}`;
+const contributorKey = (discordUserId: string) => `contributor:${discordUserId}`;
+const oauthStateKey = (state: string) => `oauth_state:${state}`;
+const lastMsgKey = (channelId: string) => `last_msg:${channelId}`;
+const claimKey = (owner: string, repo: string, issueN: number) =>
+  `claimed:${owner.toLowerCase()}/${repo.toLowerCase()}/${issueN}`;
+
+export type WatchConfig = {
+  guildId: string;
+  channelId: string;
+  owner: string;
+  repo: string;
+  installationId: number;
+  discordUserId: string;
+  addedAt: string;
+};
+
+export type ContributorLink = {
+  discordUserId: string;
+  githubLogin: string;
+  verifiedAt: string;
+};
+
+export type ClaimRecord = {
+  discordUserId?: string;
+  githubLogin: string;
+  at: string;
+  status: "claimed" | "already_taken" | "unlinked";
+  messageId?: string;
+};
 
 // ---- primitive storage layer (SQLite via D1) --------------------------------
 
@@ -70,12 +109,15 @@ async function kvDelete(env: Env, key: string): Promise<void> {
   await env.DB.prepare("DELETE FROM kv WHERE key = ?").bind(key).run();
 }
 
+// Range query instead of LIKE: SQLite's case-insensitive LIKE can't use the primary-key
+// index, so it would scan (and bill) every row in the table on each call.
 async function kvListWithPrefix(env: Env, prefix: string): Promise<{ key: string; value: string }[]> {
   const now = Math.floor(Date.now() / 1000);
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
   const { results } = await env.DB.prepare(
-    "SELECT key, value FROM kv WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)",
+    "SELECT key, value FROM kv WHERE key >= ? AND key < ? AND (expires_at IS NULL OR expires_at > ?)",
   )
-    .bind(`${prefix}%`, now)
+    .bind(prefix, upper, now)
     .all<{ key: string; value: string }>();
   return results ?? [];
 }
@@ -99,7 +141,7 @@ export async function upsertUser(
   const existing = (await getUser(env, discordUserId)) ?? {
     discordUserId,
     enabled: true,
-    autoMerge: true,
+    autoMerge: false,
     mergeStrategy: "squash" as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -159,6 +201,9 @@ const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
   "cachedVerdict",
   "cachedAddressesIssue",
   "cachedCommentPosted",
+  "cachedForIssue",
+  "cachedForIssues",
+  "cachedReview",
 ];
 
 function statesEqual(a: PRReviewState | null | undefined, b: PRReviewState): boolean {
@@ -179,4 +224,104 @@ export async function putPRState(
 ) {
   if (statesEqual(prev, s)) return;
   await kvPut(env, prKey(owner, repo, n), JSON.stringify(s), 60 * 60 * 24 * 30);
+}
+
+// ---- claim-flow helpers -----------------------------------------------------
+
+export async function getWatch(env: Env, guildId: string): Promise<WatchConfig | null> {
+  const raw = await kvGet(env, watchKey(guildId));
+  return raw ? (JSON.parse(raw) as WatchConfig) : null;
+}
+
+export async function putWatch(env: Env, cfg: WatchConfig): Promise<void> {
+  await kvPut(env, watchKey(cfg.guildId), JSON.stringify(cfg));
+}
+
+export async function listWatches(env: Env): Promise<WatchConfig[]> {
+  const rows = await kvListWithPrefix(env, "claim_channel:");
+  return rows.map((r) => JSON.parse(r.value) as WatchConfig);
+}
+
+export async function getContributor(
+  env: Env,
+  discordUserId: string,
+): Promise<ContributorLink | null> {
+  const raw = await kvGet(env, contributorKey(discordUserId));
+  return raw ? (JSON.parse(raw) as ContributorLink) : null;
+}
+
+export async function putContributor(env: Env, link: ContributorLink): Promise<void> {
+  await kvPut(env, contributorKey(link.discordUserId), JSON.stringify(link));
+}
+
+export async function putOAuthState(
+  env: Env,
+  state: string,
+  discordUserId: string,
+): Promise<void> {
+  // 10-minute TTL is plenty for a user to bounce through GitHub's consent screen.
+  await kvPut(env, oauthStateKey(state), discordUserId, 60 * 10);
+}
+
+export async function consumeOAuthState(env: Env, state: string): Promise<string | null> {
+  const raw = await kvGet(env, oauthStateKey(state));
+  if (raw) await kvDelete(env, oauthStateKey(state));
+  return raw;
+}
+
+export async function getLastMsg(env: Env, channelId: string): Promise<string | null> {
+  return kvGet(env, lastMsgKey(channelId));
+}
+
+export async function putLastMsg(env: Env, channelId: string, messageId: string): Promise<void> {
+  await kvPut(env, lastMsgKey(channelId), messageId);
+}
+
+export async function getClaim(
+  env: Env,
+  owner: string,
+  repo: string,
+  issueN: number,
+): Promise<ClaimRecord | null> {
+  const raw = await kvGet(env, claimKey(owner, repo, issueN));
+  return raw ? (JSON.parse(raw) as ClaimRecord) : null;
+}
+
+export async function putClaim(
+  env: Env,
+  owner: string,
+  repo: string,
+  issueN: number,
+  record: ClaimRecord,
+): Promise<void> {
+  // 90-day TTL. Long enough that a re-scan won't re-claim, short enough not to grow forever.
+  await kvPut(env, claimKey(owner, repo, issueN), JSON.stringify(record), 60 * 60 * 24 * 90);
+}
+
+// ---- background sweep helpers ------------------------------------------------
+
+export async function listAllRepos(env: Env): Promise<RepoConfig[]> {
+  const rows = await kvListWithPrefix(env, "repo:");
+  return rows.map((r) => JSON.parse(r.value) as RepoConfig);
+}
+
+// All stored PR states for one repo in a single indexed range read.
+export async function listPRStates(env: Env, owner: string, repo: string): Promise<Map<number, PRReviewState>> {
+  const prefix = `pr:${owner.toLowerCase()}/${repo.toLowerCase()}/`;
+  const rows = await kvListWithPrefix(env, prefix);
+  const out = new Map<number, PRReviewState>();
+  for (const r of rows) out.set(Number(r.key.slice(prefix.length)), JSON.parse(r.value) as PRReviewState);
+  return out;
+}
+
+// When the sweep last picked each PR (unix seconds), so it rotates fairly and backs off.
+const sweepKey = (owner: string, repo: string) => `sweep:${owner.toLowerCase()}/${repo.toLowerCase()}`;
+
+export async function getSweepLog(env: Env, owner: string, repo: string): Promise<Record<string, number>> {
+  const raw = await kvGet(env, sweepKey(owner, repo));
+  return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+}
+
+export async function putSweepLog(env: Env, owner: string, repo: string, log: Record<string, number>): Promise<void> {
+  await kvPut(env, sweepKey(owner, repo), JSON.stringify(log));
 }

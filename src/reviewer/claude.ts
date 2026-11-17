@@ -1,62 +1,89 @@
-// Anthropic Messages API client for the PR reviewer.
-// Uses direct fetch (not the SDK) to stay lean inside a Cloudflare Worker.
+import Anthropic from "@anthropic-ai/sdk";
+import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
-export type ReviewJSON = {
-  verdict: "approve" | "request_changes" | "comment";
-  addresses_issue: boolean;
-  ci_ok: boolean;
-  summary: string;
-  issues: string[];
-  suggested_comment: string;
+export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+
+// Structured-output schema: every object needs additionalProperties: false.
+const REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdict: { type: "string", enum: ["approve", "request_changes"] },
+    addresses_issue: { type: "boolean" },
+    summary: { type: "string" },
+    missing_requirements: { type: "array", items: { type: "string" } },
+    problems: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          severity: { type: "string", enum: ["blocking", "suggestion"] },
+          file: { type: "string" },
+          line: { type: "integer" },
+          problem: { type: "string" },
+          fix: { type: "string" },
+        },
+        required: ["severity", "file", "line", "problem", "fix"],
+      },
+    },
+  },
+  required: ["verdict", "addresses_issue", "summary", "missing_requirements", "problems"],
 };
 
-const MODEL = "claude-haiku-4-5";
-const ENDPOINT = "https://api.anthropic.com/v1/messages";
-const PER_CALL_TIMEOUT_MS = 25_000;
+export async function callClaude(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<ReviewJSON> {
+  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 40_000 });
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model,
+      max_tokens: 16000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+      output_config: { format: { type: "json_schema", schema: REVIEW_SCHEMA } },
+    });
+  } catch (e) {
+    if (
+      e instanceof Anthropic.RateLimitError ||
+      e instanceof Anthropic.InternalServerError ||
+      e instanceof Anthropic.APIConnectionError
+    ) {
+      throw new ProviderUnavailableError("claude", `Claude: ${(e as Error).message}`);
+    }
+    if (e instanceof Anthropic.APIError) throw new Error(`Claude ${e.status}: ${e.message}`);
+    throw e;
+  }
 
-function extractJSON(text: string): string {
-  // Model sometimes wraps JSON in ```json ... ``` fences; strip them.
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenced) return fenced[1]!;
-  return text.trim();
+  if (response.stop_reason === "refusal") throw new Error("Claude declined to review this PR");
+  if (response.stop_reason === "max_tokens") throw new Error("Claude's review was cut off (max_tokens)");
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  let parsed: ReviewJSON;
+  try {
+    parsed = JSON.parse(text) as ReviewJSON;
+  } catch {
+    throw new Error(`Claude returned non-JSON response: ${text.slice(0, 300)}`);
+  }
+  return { ...normalizeReview(parsed), provider: "claude" };
 }
 
-export async function callClaude(apiKey: string, systemPrompt: string, userPrompt: string): Promise<ReviewJSON> {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
-  let res: Response;
+export async function validateAnthropicKey(apiKey: string, model: string): Promise<string | null> {
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 10_000 });
   try {
-    res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(t);
-  }
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Claude ${res.status}: ${body.slice(0, 300)}`);
-  }
-
-  const data = (await res.json()) as { content?: { type: string; text?: string }[] };
-  const text = data.content?.find((b) => b.type === "text")?.text ?? "";
-  if (!text) throw new Error("Claude returned no text content");
-
-  try {
-    return JSON.parse(extractJSON(text)) as ReviewJSON;
+    await client.models.retrieve(model);
+    return null;
   } catch (e) {
-    throw new Error(`Claude returned non-JSON response: ${text.slice(0, 300)}`);
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) {
+      return "Anthropic says that key isn't valid. Copy it again from https://console.anthropic.com/settings/keys (it starts with `sk-ant-`) and run `/setup` again.";
+    }
+    if (e instanceof Anthropic.NotFoundError) return `The Anthropic key works but model \`${model}\` was not found for it.`;
+    return `Could not verify the Anthropic key (${(e as Error).message.slice(0, 120)}).`;
   }
 }

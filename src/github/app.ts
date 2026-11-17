@@ -1,7 +1,7 @@
 // Minimal GitHub App auth for Cloudflare Workers.
 // - JWT signed with the app's RSA private key (RS256).
 // - Exchanged for a per-installation token from POST /app/installations/{id}/access_tokens.
-// Installation tokens live ~1 hour and are cached in memory per request.
+// Installation tokens live ~1 hour and are cached in isolate memory until shortly before expiry.
 
 import type { Env } from "../index";
 
@@ -64,7 +64,12 @@ export async function getInstallationForRepo(
   return data.id;
 }
 
+// Isolate-level cache. Tokens live ~60 minutes; we refresh 5 minutes early.
+const tokenCache = new Map<number, { token: string; expiresAt: number }>();
+
 export async function installationToken(env: Env, installationId: number): Promise<string> {
+  const cached = tokenCache.get(installationId);
+  if (cached && cached.expiresAt - 5 * 60_000 > Date.now()) return cached.token;
   const jwt = await signAppJWT(env);
   const res = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -78,6 +83,8 @@ export async function installationToken(env: Env, installationId: number): Promi
     },
   );
   if (!res.ok) throw new Error(`installation token failed: ${res.status} ${await res.text()}`);
-  const data = (await res.json()) as { token: string };
+  const data = (await res.json()) as { token: string; expires_at?: string };
+  const expiresAt = data.expires_at ? Date.parse(data.expires_at) : Date.now() + 55 * 60_000;
+  tokenCache.set(installationId, { token: data.token, expiresAt });
   return data.token;
 }

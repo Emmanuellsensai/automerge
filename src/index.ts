@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { handleDiscordInteraction } from "./discord/interactions";
 import { handleGitHubWebhook } from "./github/webhook";
+import { handleOAuthStart, handleOAuthCallback } from "./github/oauth";
+import { pollAllWatches } from "./claims/poll";
+import { maybeSweep } from "./reviewer/sweep";
 
 export type Env = {
   DB: D1Database;
@@ -11,6 +14,17 @@ export type Env = {
   GITHUB_APP_PRIVATE_KEY: string;
   GITHUB_WEBHOOK_SECRET: string;
   ENCRYPTION_KEY: string;
+  GITHUB_OAUTH_CLIENT_ID: string;
+  GITHUB_OAUTH_CLIENT_SECRET: string;
+  PUBLIC_BASE_URL: string;
+  GEMINI_MODEL?: string;
+  ANTHROPIC_MODEL?: string;
+  SWEEP_INTERVAL_MINUTES?: string;
+  SWEEP_MAX_PRS?: string;
+  MALWARE_GATE_FIRST_TIME?: string;
+  MALWARE_GATE_TRUSTED?: string;
+  MAX_REPOS?: string;
+  MAX_REPOS_PER_USER?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -25,5 +39,17 @@ app.get("/health", (c) => c.json({ ok: true, service: "automerge" }));
 
 app.post("/discord/interactions", (c) => handleDiscordInteraction(c));
 app.post("/github/webhook", (c) => handleGitHubWebhook(c));
+app.get("/github/oauth/start", (c) => handleOAuthStart(c));
+app.get("/github/oauth/callback", (c) => handleOAuthCallback(c));
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      Promise.all([
+        pollAllWatches(env).catch((e) => console.error("claims poll failed", e)),
+        maybeSweep(env, event.scheduledTime).catch((e) => console.error("PR sweep failed", e)),
+      ]),
+    );
+  },
+};
