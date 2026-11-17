@@ -25,6 +25,7 @@ export type PR = {
   head: { sha: string; ref: string };
   base: { ref: string };
   user: { login: string } | null;
+  author_association?: string;
   html_url: string;
   mergeable: boolean | null;
   mergeable_state: string;
@@ -193,27 +194,103 @@ export async function upsertMarkedComment(
   await commentOnPR(env, installationId, owner, repo, n, body.includes(marker) ? body : `${body}\n\n${marker}`);
 }
 
-// List the files changed in a PR (paginated up to 300 files).
-export async function listPRFiles(
+// A file changed in a PR, with the fields the malware gate reads. `patch` is absent for
+// binary files and for diffs GitHub considers too large; the gate treats that as "hold".
+export type PRFile = {
+  filename: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+  changes?: number;
+  patch?: string;
+  previous_filename?: string;
+};
+
+// List the files changed in a PR (paginated up to 300 files). `complete` is false when a page
+// failed or the 300 file cap was hit, so a caller that must not miss a file can fail closed.
+export async function listPRFilesChecked(
   env: Env,
   installationId: number,
   owner: string,
   repo: string,
   n: number,
-): Promise<{ filename: string; status: string }[]> {
-  const out: { filename: string; status: string }[] = [];
+): Promise<{ files: PRFile[]; complete: boolean }> {
+  const files: PRFile[] = [];
   for (let page = 1; page <= 3; page++) {
     const r = await ghFetch(
       env,
       installationId,
       `/repos/${owner}/${repo}/pulls/${n}/files?per_page=100&page=${page}`,
     );
-    if (!r.ok) break;
-    const batch = (await r.json()) as { filename: string; status: string }[];
-    out.push(...batch);
-    if (batch.length < 100) break;
+    if (!r.ok) return { files, complete: false };
+    const batch = (await r.json()) as PRFile[];
+    files.push(...batch);
+    if (batch.length < 100) return { files, complete: true };
   }
-  return out;
+  return { files, complete: false };
+}
+
+export async function listPRFiles(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  n: number,
+): Promise<PRFile[]> {
+  return (await listPRFilesChecked(env, installationId, owner, repo, n)).files;
+}
+
+// Best effort: label a PR so a maintainer can find it. Never throws; the hold does not depend on it.
+export async function labelPR(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  n: number,
+  label: string,
+  color = "d93f0b",
+  description = "Held by the malware gate; a maintainer must read the diff",
+): Promise<void> {
+  try {
+    await ghFetch(env, installationId, `/repos/${owner}/${repo}/labels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: label, color, description }),
+    }); // 422 when it already exists; ignored
+    const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/${n}/labels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ labels: [label] }),
+    });
+    if (!r.ok) console.warn(`labelPR: ${r.status}`);
+  } catch (e) {
+    console.warn("labelPR failed", e);
+  }
+}
+
+// Best effort: publish a commit status so branch protection can require it and block a manual
+// merge too. Needs the GitHub App's "Commit statuses: write" permission; without it this logs
+// a warning and nothing else happens.
+export async function setCommitStatus(
+  env: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  sha: string,
+  state: "success" | "failure",
+  description: string,
+  context = "malware-gate",
+): Promise<void> {
+  try {
+    const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/statuses/${sha}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state, context, description: description.slice(0, 140) }),
+    });
+    if (!r.ok) console.warn(`setCommitStatus: ${r.status}`);
+  } catch (e) {
+    console.warn("setCommitStatus failed", e);
+  }
 }
 
 export async function listWorkflowRunsAwaitingApproval(

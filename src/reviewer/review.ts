@@ -7,8 +7,10 @@ import {
   getIssue,
   getPR,
   getPRDiff,
+  labelPR,
   listOpenPRs,
-  listPRFiles,
+  listPRFilesChecked,
+  setCommitStatus,
   listWorkflowRunsAwaitingApproval,
   mergePR,
   upsertMarkedComment,
@@ -19,10 +21,22 @@ import { decryptSecret } from "../kv/crypto";
 import { DEFAULT_GEMINI_MODEL } from "./gemini";
 import { DEFAULT_ANTHROPIC_MODEL } from "./claude";
 import { runReview, type LlmKeys } from "./llm";
+import { analyzeGate, renderFindings, type GateOptions } from "./malware-gate";
 import type { ReviewJSON, ReviewProblem } from "./types";
 
 const DIFF_MAX_CHARS = 60_000;
 const COMMENT_MARKER = "<!-- automerge-gate -->";
+const HOLD_LABEL = "needs-human-review";
+
+// Malware gate settings. Both are optional Worker variables:
+//   MALWARE_GATE_FIRST_TIME="off"   stop holding first-time contributors on that rule alone
+//   MALWARE_GATE_TRUSTED="a,b"      logins exempt from the first-time rule (content rules still apply)
+function gateOptions(env: Env): GateOptions {
+  return {
+    holdFirstTime: (env.MALWARE_GATE_FIRST_TIME ?? "on").toLowerCase() !== "off",
+    trustedAuthors: (env.MALWARE_GATE_TRUSTED ?? "").split(",").map((x) => x.trim()).filter(Boolean),
+  };
+}
 
 const SYSTEM_PROMPT = `You are AutoMerge, a strict but fair pull request reviewer working for the maintainer of an open-source repository.
 
@@ -460,6 +474,38 @@ async function reviewOne(
     return finish("blocked", "AutoMerge: fix the steps below before I can review this PR", "thanks for the PR! Before I can review the code, please sort out the steps below.");
   }
 
+  // ---- gate 2a: malware gate (deterministic, no AI, fails closed) ----
+  // This runs BEFORE the PR's workflow runs are approved below: approving a run executes the
+  // PR's own code on a runner, so the diff has to be judged first. Anything that touches
+  // build/CI entry points, looks obfuscated, hides characters, or comes from a first-time
+  // author is held for a human and is never merged by this bot. See malware-gate.ts.
+  const { files: changed, complete: filesComplete } = await listPRFilesChecked(env, installationId, owner, repo, n);
+  const hold = analyzeGate(
+    { author: login, authorAssociation: pr.author_association ?? "", truncated: !filesComplete },
+    changed,
+    gateOptions(env),
+  );
+  if (hold.length > 0 && !(changed.length === 0 && filesComplete)) {
+    gates.push(
+      { name: "Malware gate", mark: "fail", note: `${hold.length} signal(s), held for a maintainer` },
+      { name: "Merge conflicts", mark: "skip", note: "not checked" },
+      { name: "Automatic tests (CI)", mark: "skip", note: "not run for this PR until a maintainer approves" },
+      { name: "AI code review", mark: "skip", note: "not run" },
+    );
+    steps.push({
+      title: "A maintainer has to read this PR before it can merge.",
+      detail:
+        renderFindings(hold) +
+        "\n\nThis is not a rejection and not an accusation. AutoMerge never merges a PR with these signals; a maintainer will read the diff and merge it by hand if it is fine. " +
+        "Pushing a new commit that removes the flagged changes makes AutoMerge re-check it.",
+    });
+    await labelPR(env, installationId, owner, repo, n, HOLD_LABEL);
+    await setCommitStatus(env, installationId, owner, repo, pr.head.sha, "failure", "Held for human review");
+    return finish("blocked", "AutoMerge: held for maintainer review", "thanks for the PR! A security check needs a maintainer to read this one before anything merges.");
+  }
+  gates.push({ name: "Malware gate", mark: "pass", note: "no signals" });
+  await setCommitStatus(env, installationId, owner, repo, pr.head.sha, "success", "No malware-gate signals");
+
   // Assigned contributor: approve first-time-contributor workflow runs so CI can actually run.
   const waiting = await listWorkflowRunsAwaitingApproval(env, installationId, owner, repo, pr.head.sha);
   for (const run of waiting) {
@@ -469,7 +515,6 @@ async function reviewOne(
   }
 
   // ---- gate 2: policy gates (deps, scope). Still no LLM spend. ----
-  const changed = await listPRFiles(env, installationId, owner, repo, n);
   if (changed.length === 0) {
     gates.push(
       { name: "Has changes", mark: "fail", note: `nothing differs from \`${base}\`` },

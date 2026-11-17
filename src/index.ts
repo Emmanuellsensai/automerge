@@ -21,6 +21,8 @@ export type Env = {
   ANTHROPIC_MODEL?: string;
   SWEEP_INTERVAL_MINUTES?: string;
   SWEEP_MAX_PRS?: string;
+  MALWARE_GATE_FIRST_TIME?: string;
+  MALWARE_GATE_TRUSTED?: string;
   MAX_REPOS?: string;
   MAX_REPOS_PER_USER?: string;
 };

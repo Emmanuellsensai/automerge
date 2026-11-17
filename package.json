@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "register-commands": "tsx src/register-commands.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --test test/malware-gate.test.ts",
     "lint": "eslint src"
   },
   "devDependencies": {
