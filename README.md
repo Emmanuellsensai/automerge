@@ -86,6 +86,7 @@ Everything else, the bot's hosting, runs on the maintainer's Cloudflare account,
 | `/repo remove slug:<link>` | Stop watching a repo. |
 | `/repo list` | See which repos AutoMerge watches. |
 | `/check slug:<PR link>` | Review a PR right now and see the result in Discord. |
+| `/check slug:<owner/repo>` | Re-check every open PR in the repo. They are queued and the background sweep works through them a few at a time; the reply says roughly how long. Unchanged PRs reuse their cached AI review, so this costs no AI credit for them. |
 | `/config auto_merge value:<on\|off>` | Let AutoMerge merge PRs that pass every check. |
 | `/config strategy value:<squash\|merge\|rebase>` | How PRs are merged. Squash is recommended. |
 | `/on` and `/off` | Resume or pause AutoMerge. |

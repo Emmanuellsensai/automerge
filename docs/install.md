@@ -120,7 +120,7 @@ Checks 1 to 4 are free. The AI is only asked when they pass, and at most once pe
 | `/repo add` | Start watching a repo (paste its GitHub link). |
 | `/repo remove` | Stop watching a repo. Nothing on GitHub changes. |
 | `/repo list` | See which repos AutoMerge watches. |
-| `/check` | Review a PR right now. Paste the PR link; the result shows in Discord. |
+| `/check` | Review a PR right now. Paste the PR link; the result shows in Discord. Paste just the repo (`owner/repo`) to queue every open PR for a re-check; the background sweep works through them a few at a time. |
 | `/config auto_merge` | Let AutoMerge merge PRs that pass (on/off). |
 | `/config strategy` | How PRs are merged. **Squash** (recommended) turns a PR into one tidy commit. |
 | `/on` and `/off` | Resume or pause AutoMerge. |
