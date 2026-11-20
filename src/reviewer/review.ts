@@ -21,7 +21,7 @@ import { decryptSecret } from "../kv/crypto";
 import { DEFAULT_GEMINI_MODEL } from "./gemini";
 import { DEFAULT_ANTHROPIC_MODEL } from "./claude";
 import { runReview, type LlmKeys } from "./llm";
-import { analyzeGate, renderFindings, type GateOptions } from "./malware-gate";
+import { analyzeGate, decideGate, parseFirstTimeMode, renderFindings, type GateOptions } from "./malware-gate";
 import type { ReviewJSON, ReviewProblem } from "./types";
 
 const DIFF_MAX_CHARS = 60_000;
@@ -29,11 +29,16 @@ const COMMENT_MARKER = "<!-- automerge-gate -->";
 const HOLD_LABEL = "needs-human-review";
 
 // Malware gate settings. Both are optional Worker variables:
-//   MALWARE_GATE_FIRST_TIME="off"   stop holding first-time contributors on that rule alone
-//   MALWARE_GATE_TRUSTED="a,b"      logins exempt from the first-time rule (content rules still apply)
+//   MALWARE_GATE_FIRST_TIME   what happens to a first-time contributor's PR that has no content
+//                             signals: "merge" (default; auto-merges once every gate passes),
+//                             "review" (every gate runs, then a maintainer presses Merge) or
+//                             "hold" (held at once, before CI and the AI review). "off" = merge,
+//                             "on" = hold. Content signals hold the PR in every mode.
+//   MALWARE_GATE_TRUSTED="a,b"  logins never treated as first-time (content rules still apply)
 function gateOptions(env: Env): GateOptions {
   return {
-    holdFirstTime: (env.MALWARE_GATE_FIRST_TIME ?? "on").toLowerCase() !== "off",
+    // Always detect first-time authors; decideGate() applies MALWARE_GATE_FIRST_TIME.
+    holdFirstTime: true,
     trustedAuthors: (env.MALWARE_GATE_TRUSTED ?? "").split(",").map((x) => x.trim()).filter(Boolean),
   };
 }
@@ -477,14 +482,18 @@ async function reviewOne(
   // ---- gate 2a: malware gate (deterministic, no AI, fails closed) ----
   // This runs BEFORE the PR's workflow runs are approved below: approving a run executes the
   // PR's own code on a runner, so the diff has to be judged first. Anything that touches
-  // build/CI entry points, looks obfuscated, hides characters, or comes from a first-time
-  // author is held for a human and is never merged by this bot. See malware-gate.ts.
+  // build/CI entry points, looks obfuscated or hides characters is held for a human and is
+  // never merged by this bot. First-time authors follow MALWARE_GATE_FIRST_TIME. See malware-gate.ts.
   const { files: changed, complete: filesComplete } = await listPRFilesChecked(env, installationId, owner, repo, n);
-  const hold = analyzeGate(
-    { author: login, authorAssociation: pr.author_association ?? "", truncated: !filesComplete },
-    changed,
-    gateOptions(env),
+  const gate = decideGate(
+    analyzeGate(
+      { author: login, authorAssociation: pr.author_association ?? "", truncated: !filesComplete },
+      changed,
+      gateOptions(env),
+    ),
+    parseFirstTimeMode(env.MALWARE_GATE_FIRST_TIME),
   );
+  const hold = gate.hold;
   if (hold.length > 0 && !(changed.length === 0 && filesComplete)) {
     gates.push(
       { name: "Malware gate", mark: "fail", note: `${hold.length} signal(s), held for a maintainer` },
@@ -503,7 +512,7 @@ async function reviewOne(
     await setCommitStatus(env, installationId, owner, repo, pr.head.sha, "failure", "Held for human review");
     return finish("blocked", "AutoMerge: held for maintainer review", "thanks for the PR! A security check needs a maintainer to read this one before anything merges.");
   }
-  gates.push({ name: "Malware gate", mark: "pass", note: "no signals" });
+  gates.push({ name: "Malware gate", mark: "pass", note: gate.firstTime ? "no content signals (first-time contributor)" : "no signals" });
   await setCommitStatus(env, installationId, owner, repo, pr.head.sha, "success", "No malware-gate signals");
 
   // Assigned contributor: approve first-time-contributor workflow runs so CI can actually run.
@@ -711,6 +720,18 @@ async function reviewOne(
       "queued",
       "AutoMerge: code looks good, waiting for CI",
       `${review.summary} Nothing to do on your side. I'll merge as soon as CI passes.`,
+      cacheFields,
+      suggestions,
+    );
+  }
+
+  if (gate.maintainerMerges) {
+    gates.push({ name: "Maintainer allows auto-merge", mark: "wait", note: "a maintainer merges first-time contributors' PRs" });
+    await labelPR(env, installationId, owner, repo, n, HOLD_LABEL);
+    return finish(
+      "reviewed",
+      "AutoMerge: approved, waiting for a maintainer to merge",
+      `${review.summary} Every check passes. This is your first PR here, so a maintainer presses Merge. Nothing else to do on your side.`,
       cacheFields,
       suggestions,
     );
