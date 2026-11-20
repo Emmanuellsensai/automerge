@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "register-commands": "tsx src/register-commands.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/malware-gate.test.ts test/fallback.test.ts test/scope.test.ts test/headline.test.ts",
+    "test": "node --test test/malware-gate.test.ts test/fallback.test.ts test/scope.test.ts test/headline.test.ts test/sweep-due.test.ts",
     "lint": "eslint src"
   },
   "devDependencies": {

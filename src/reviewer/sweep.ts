@@ -1,7 +1,8 @@
 import type { Env } from "../index";
 import { listOpenPRs, type PR } from "../github/api";
-import { getSweepLog, getUser, listAllRepos, listPRStates, putSweepLog, type PRReviewState, type RepoConfig } from "../kv/config";
+import { getSweepLog, getUser, listAllRepos, listPRStates, putSweepLog, type RepoConfig } from "../kv/config";
 import { reviewPR } from "./review";
+import { FORCE_KEY, isDue, recentlySwept } from "./sweep-due";
 
 // Webhooks handle most reviews instantly. The sweep is a safety net that catches what they
 // miss (missed deliveries, AI rate limits, issues assigned after the PR was opened) while
@@ -9,24 +10,10 @@ import { reviewPR } from "./review";
 const DEFAULT_INTERVAL_MINUTES = 5;
 // Each review costs ~10-14 outbound requests; the Workers free plan allows 50 per invocation.
 const DEFAULT_MAX_PRS_PER_RUN = 2;
-// Never pick the same PR again within this window, so failures back off instead of looping.
-const MIN_GAP_SECONDS = 15 * 60;
-// PRs already reviewed on their current commit are re-checked this rarely (gates like
-// issue assignment can change without a new push). Unchanged PRs never re-call the AI.
-const RECHECK_SECONDS = 6 * 60 * 60;
 
 function num(v: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : fallback;
-}
-
-function needsWork(pr: PR, state: PRReviewState | undefined, now: number): boolean {
-  if (!state) return true;
-  if (state.lastCommitSha !== pr.head.sha) return true;
-  if (state.status === "merged") return false;
-  if (state.status === "queued") return true;
-  const last = state.lastReviewAt ? Date.parse(state.lastReviewAt) / 1000 : 0;
-  return now - last > RECHECK_SECONDS;
 }
 
 export async function maybeSweep(env: Env, scheduledTimeMs: number): Promise<void> {
@@ -59,17 +46,18 @@ export async function sweepOpenPRs(env: Env, maxPrs: number): Promise<void> {
     // Drop entries for PRs that are no longer open so the log stays small.
     const openNums = new Set(open.map((p) => String(p.number)));
     for (const k of Object.keys(log)) {
-      if (!openNums.has(k)) {
+      if (k !== FORCE_KEY && !openNums.has(k)) {
         delete log[k];
         dirty.add(repo);
       }
     }
     logs.set(repo, log);
 
+    const forcedAt = log[FORCE_KEY] ?? 0;
     for (const pr of open) {
       const lastSwept = log[String(pr.number)] ?? 0;
-      if (now - lastSwept < MIN_GAP_SECONDS) continue;
-      if (needsWork(pr, states.get(pr.number), now)) candidates.push({ repo, n: pr.number, lastSwept });
+      if (recentlySwept(lastSwept, now, forcedAt)) continue;
+      if (isDue(pr.head.sha, states.get(pr.number), now, forcedAt)) candidates.push({ repo, n: pr.number, lastSwept });
     }
   }
 
