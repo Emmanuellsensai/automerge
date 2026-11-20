@@ -160,6 +160,18 @@ This needs the **Actions: Read and write** permission. If you installed AutoMerg
 1. Open `https://github.com/settings/apps/automerge-wave/permissions`, set **Actions** to **Read and write**, and save.
 2. Open `https://github.com/settings/installations`, click **Configure** next to AutoMerge-wave, and click **Accept new permissions**.
 
+## First-time contributors and the malware gate
+
+Any PR whose diff touches CI, build, install or git files, changes dependencies in a risky way, adds binaries, or looks obfuscated is held for a maintainer and never merged by AutoMerge.
+
+A first-time contributor's PR with none of those signals follows the `MALWARE_GATE_FIRST_TIME` Worker variable:
+
+- `merge` (default): it goes through every other gate (assignment, scope, conflicts, CI, AI review) and auto-merges when they all pass.
+- `review`: every gate runs, then it waits with the `needs-human-review` label for a maintainer to press Merge.
+- `hold`: it is held straight away, before CI or the AI review runs.
+
+`MALWARE_GATE_TRUSTED="login1,login2"` treats those logins as repeat contributors. Content signals still apply to them.
+
 ## Troubleshooting
 
 **"Step 1 isn't done yet"**: run `/setup` with your Gemini key first.
