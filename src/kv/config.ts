@@ -222,7 +222,11 @@ export async function putPRState(
   s: PRReviewState,
   prev?: PRReviewState | null,
 ) {
-  if (statesEqual(prev, s)) return;
+  // Skip identical writes, but still record a review every 10 minutes at most: the sweep reads
+  // lastReviewAt to know a PR was re-checked (a full /check re-check relies on it).
+  const prevAt = prev?.lastReviewAt ? Date.parse(prev.lastReviewAt) : 0;
+  const nextAt = s.lastReviewAt ? Date.parse(s.lastReviewAt) : 0;
+  if (statesEqual(prev, s) && nextAt - prevAt < 10 * 60 * 1000) return;
   await kvPut(env, prKey(owner, repo, n), JSON.stringify(s), 60 * 60 * 24 * 30);
 }
 
