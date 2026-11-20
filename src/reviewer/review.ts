@@ -652,7 +652,19 @@ async function reviewOne(
       `<files>\n${changed.map((f) => `${f.status}\t${f.filename}`).join("\n")}\n</files>`,
       `<diff>\n${diff}\n</diff>`,
     ].join("\n\n");
-    review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt);
+    try {
+      review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt);
+    } catch (e) {
+      // Without this the PR got no comment at all: the error only reached the Worker logs.
+      const why = (e as Error).message.replace(/\s+/g, " ").slice(0, 200);
+      console.error(`AI review failed on ${owner}/${repo}#${n}: ${why}`);
+      gates.push({ name: "AI code review", mark: "wait", note: "could not run, will retry" });
+      steps.push({
+        title: "Nothing to do on your side: the AI reviewer is unavailable right now.",
+        detail: `AutoMerge will retry automatically. Maintainer: the AI provider returned \`${why}\`. Check the API keys with \`/status\`.`,
+      });
+      return finish("queued", "AutoMerge: waiting for the AI reviewer", "thanks for the PR! Every check so far passes; the AI review couldn't run yet.");
+    }
   }
 
   // The model sometimes names a location that isn't a changed file; drop it rather than mislead.
