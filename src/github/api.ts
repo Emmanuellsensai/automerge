@@ -26,6 +26,7 @@ export type PR = {
   base: { ref: string };
   user: { login: string } | null;
   author_association?: string;
+  labels?: { name: string }[];
   html_url: string;
   mergeable: boolean | null;
   mergeable_state: string;
@@ -238,6 +239,18 @@ export async function listPRFiles(
   n: number,
 ): Promise<PRFile[]> {
   return (await listPRFilesChecked(env, installationId, owner, repo, n)).files;
+}
+
+// Best effort: remove a label from a PR. Never throws; 404 (label not on the PR) is fine.
+export async function unlabelPR(env: Env, installationId: number, owner: string, repo: string, n: number, label: string): Promise<void> {
+  try {
+    const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/${n}/labels/${encodeURIComponent(label)}`, {
+      method: "DELETE",
+    });
+    if (!r.ok && r.status !== 404) console.warn(`unlabelPR: ${r.status}`);
+  } catch (e) {
+    console.warn(`unlabelPR failed on ${owner}/${repo}#${n}`, e);
+  }
 }
 
 // Best effort: label a PR so a maintainer can find it. Never throws; the hold does not depend on it.
