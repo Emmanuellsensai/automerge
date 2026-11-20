@@ -1,3 +1,4 @@
+import { statusChanged } from "./headline";
 import type { Env } from "../index";
 import { installationToken } from "./app";
 
@@ -171,6 +172,9 @@ export async function upsertMarkedComment(
   n: number,
   marker: string,
   body: string,
+  // Post a fresh comment (and delete the old one) when the status headline changes, so the
+  // author gets a notification. Edits notify nobody.
+  repostOnStatusChange = false,
 ): Promise<void> {
   const listRes = await ghFetch(
     env,
@@ -183,6 +187,12 @@ export async function upsertMarkedComment(
     const finalBody = body.includes(marker) ? body : `${body}\n\n${marker}`;
     if (existing) {
       if (existing.body === finalBody) return;
+      if (repostOnStatusChange && statusChanged(existing.body, finalBody)) {
+        await commentOnPR(env, installationId, owner, repo, n, finalBody);
+        const d = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/comments/${existing.id}`, { method: "DELETE" });
+        if (!d.ok && d.status !== 404) console.warn(`upsertMarkedComment (delete old): ${d.status}`);
+        return;
+      }
       const r = await ghFetch(env, installationId, `/repos/${owner}/${repo}/issues/comments/${existing.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
