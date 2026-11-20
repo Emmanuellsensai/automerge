@@ -8,6 +8,7 @@ import {
   getPR,
   getPRDiff,
   labelPR,
+  unlabelPR,
   listOpenPRs,
   listPRFilesChecked,
   setCommitStatus,
@@ -23,6 +24,7 @@ import { DEFAULT_ANTHROPIC_MODEL } from "./claude";
 import { runReview, type LlmKeys } from "./llm";
 import { analyzeGate, decideGate, parseFirstTimeMode, renderFindings, type GateOptions } from "./malware-gate";
 import type { ReviewJSON, ReviewProblem } from "./types";
+import { extractIssueScopePaths, outOfScopeFiles, type ChangedFile } from "./scope";
 
 const DIFF_MAX_CHARS = 60_000;
 const COMMENT_MARKER = "<!-- automerge-gate -->";
@@ -91,7 +93,6 @@ const DEPENDENCY_MANIFESTS = [
   /(^|\/)composer\.(json|lock)$/i,
 ];
 
-type ChangedFile = { filename: string; status: string };
 
 // A PR may close several issues at once ("Closes #12\nCloses #15"). We collect every one
 // so the assignment and scope gates consider all of them, not just the first.
@@ -122,32 +123,6 @@ type LinkedIssue = {
   assignees: { login: string }[];
   state: string;
 };
-
-function extractIssueScopePaths(issueBody: string | null): string[] {
-  if (!issueBody) return [];
-  const raw = issueBody.match(/`[a-zA-Z0-9_./\-]+`/g) ?? [];
-  return Array.from(
-    new Set(
-      raw
-        .map((t) => t.replace(/`/g, "").replace(/^\.\//, "").replace(/\/+$/, ""))
-        // MIME types and URL routes contain "/" but are not repository paths.
-        .filter((p) => !/^(text|application|image|audio|video|multipart|font|message)\/[\w.+-]+$/i.test(p))
-        .filter((p) => !p.startsWith("/"))
-        .filter((p) => /\//.test(p) || /\.(go|ts|tsx|js|jsx|py|rs|md|ya?ml|json|sql|toml|sh)$/i.test(p)),
-    ),
-  );
-}
-
-function outOfScopeFiles(changed: ChangedFile[], scope: string[]): ChangedFile[] {
-  if (scope.length === 0) return [];
-  return changed.filter((f) => {
-    if (/(_test\.(go|py|ts|tsx|js|jsx|rs))$|(\.test\.(ts|tsx|js|jsx))$|\.spec\.(ts|tsx|js|jsx)$/.test(f.filename)) return false;
-    if (/^docs?\//i.test(f.filename) || /\.md$/i.test(f.filename)) return false;
-    // Issues often name a file without its extension (`cli/cmd/watchdog` for watchdog.go).
-    const noExt = f.filename.replace(/\.[^/.]+$/, "");
-    return !scope.some((p) => f.filename === p || noExt === p || f.filename.startsWith(p + "/"));
-  });
-}
 
 type FailingCheck = { name: string; url?: string; detail?: string; errors: string[] };
 type CiResult = {
@@ -514,6 +489,8 @@ async function reviewOne(
   }
   gates.push({ name: "Malware gate", mark: "pass", note: gate.firstTime ? "no content signals (first-time contributor)" : "no signals" });
   await setCommitStatus(env, installationId, owner, repo, pr.head.sha, "success", "No malware-gate signals");
+  // A PR held on an earlier commit (or under an older policy) keeps the hold label otherwise.
+  if (!gate.maintainerMerges && pr.labels?.some((l) => l.name === HOLD_LABEL)) await unlabelPR(env, installationId, owner, repo, n, HOLD_LABEL);
 
   // Assigned contributor: approve first-time-contributor workflow runs so CI can actually run.
   const waiting = await listWorkflowRunsAwaitingApproval(env, installationId, owner, repo, pr.head.sha);
