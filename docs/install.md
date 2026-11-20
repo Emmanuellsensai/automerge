@@ -36,7 +36,7 @@ Type `/help` in any channel. If AutoMerge answers, it's in.
 
 AutoMerge checks the key with Google right away. If it says the key isn't valid, copy it again and retry.
 
-**Optional backup key.** Gemini's free tier has rate limits. If you also add an Anthropic key, AutoMerge switches to Claude only when Gemini is rate-limited, out of quota, or overloaded, so reviews never stall. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
+**Optional backup key.** Gemini's free tier has rate limits. If you also add an Anthropic key, AutoMerge switches to Claude only when Gemini is rate-limited, out of quota, overloaded, or has a billing or key problem, so reviews never stall. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
 
 Your key is encrypted before it is saved and is only used to review your PRs. Keep it private: don't paste it anywhere else in the chat.
 
@@ -182,7 +182,7 @@ A first-time contributor's PR with none of those signals follows the `MALWARE_GA
 
 **The bot didn't comment on a PR**: type `/check` and paste the PR link. The answer in Discord tells you what happened. Common reasons: the PR is a draft, AutoMerge is paused (`/on`), or the repo isn't added (`/repo list`).
 
-**"Gemini 429" in a review**: you hit Gemini's rate limit or free-tier quota. Add an Anthropic backup key with `/setup anthropic_api_key:...` so Claude covers these moments, or add billing in Google AI Studio.
+**"Gemini 429" or "Gemini 403" in a review**: Gemini is rate-limited, out of quota, or has a billing or key problem. With an Anthropic backup key saved (`/setup anthropic_api_key:...`), Claude reviews instead; this message only appears when no backup key is saved. Fix billing in Google AI Studio to use Gemini again.
 
 **"The merge was rejected by GitHub"**: usually branch protection. Check the repo's branch rules, or merge by hand.
 
