@@ -1,6 +1,7 @@
 // Gemini generateContent client for the PR reviewer.
 // Direct fetch (no SDK) to stay lean inside a Cloudflare Worker.
 
+import { geminiShouldFallBack } from "./fallback";
 import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
@@ -81,9 +82,8 @@ export async function callGemini(
       if (m) detail = m.replace(/\s+/g, " ").slice(0, 1000);
     } catch {}
     const msg = `Gemini ${res.status}: ${detail}`;
-    // 429 = rate limit or quota exhausted; 500/503 = Google-side overload;
-    // 404 = model retired or not offered to this key. All mean "use the backup".
-    if ([404, 429, 500, 503].includes(res.status)) throw new ProviderUnavailableError("gemini", msg);
+    // Key, billing, quota, retired-model and overload errors all mean "use the backup".
+    if (geminiShouldFallBack(res.status)) throw new ProviderUnavailableError("gemini", msg);
     throw new Error(msg);
   }
 

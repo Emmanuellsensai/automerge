@@ -16,7 +16,7 @@ Anyone who maintains a GitHub repo can use it. No coding needed: you type a few 
 
 * **Reads every pull request** on the repos you choose.
 * **Checks the basics first, for free:** the PR links an issue, the author is assigned to that issue, it doesn't add dependencies, and it only touches the files the issue is about.
-* **Reviews the code with Gemini**, once per commit. If Gemini is rate-limited or out of quota, an optional **Anthropic (Claude) backup key** takes over so reviews don't stall.
+* **Reviews the code with Gemini**, once per commit. If Gemini is rate-limited, out of quota or has a billing problem, an optional **Anthropic (Claude) backup key** takes over so reviews don't stall.
 * **Posts one comment with a numbered to-do list** for the contributor: which file and line, what is wrong, and the exact fix (including the git commands for things like merge conflicts). The comment updates itself on every push, so the PR page never fills up with old reviews.
 * **Lets first-time contributors' tests run** by approving their waiting workflow runs.
 * **Merges the PR** when everything passes, if you turned auto-merge on.
