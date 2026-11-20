@@ -362,7 +362,7 @@ async function reviewOne(
   ): Promise<ReviewOutcome> => {
     const footer = `Checked commit \`${pr.head.sha.slice(0, 7)}\`. ${RECHECK_FOOTER}`;
     const body = renderComment({ login, headline, intro, steps, suggestions, gates, footer });
-    await upsertMarkedComment(env, installationId, owner, repo, n, COMMENT_MARKER, body);
+    await upsertMarkedComment(env, installationId, owner, repo, n, COMMENT_MARKER, body, true);
     await putPRState(
       env,
       owner,
