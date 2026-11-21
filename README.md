@@ -60,7 +60,7 @@ The only thing you pay for is your **own AI usage**:
 * A **Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey). Google has a free tier with daily limits; check [Google's pricing](https://ai.google.dev/pricing) for current numbers, since they change.
 * Optionally an **Anthropic (Claude) key** as a backup, used only when Gemini is rate-limited or out of quota. You pay Anthropic only for those reviews.
 
-To keep this low, the AI is called **at most once per commit**, and PRs that fail the basic checks (no linked issue, not assigned, dependency or scope problems) never call the AI at all.
+To keep this low, the AI is called **at most once per commit**, and PRs that fail the basic checks (no linked issue, not assigned, dependency changes) never call the AI at all. Files outside the paths an issue names are not a hard failure: a named path covers its whole app or service, generated clients are allowed when the API spec changes, and the AI review judges anything left over.
 
 Everything else, the bot's hosting, runs on the maintainer's Cloudflare account, not yours.
 
