@@ -21,7 +21,9 @@ import { getPRState, getRepo, getUser, putPRState, type PRReviewState } from "..
 import { decryptSecret } from "../kv/crypto";
 import { DEFAULT_GEMINI_MODEL } from "./gemini";
 import { DEFAULT_ANTHROPIC_MODEL } from "./claude";
-import { runReview, type LlmKeys } from "./llm";
+import { AiReviewError, runReview, type LlmKeys } from "./llm";
+import { claudeFirst, deadlineFrom, hasTimeForAnotherPR, nextAttemptCount } from "./budget";
+import { MIN_GAP_SECONDS } from "./sweep-due";
 import { analyzeGate, decideGate, parseFirstTimeMode, renderFindings, type GateOptions } from "./malware-gate";
 import type { ReviewJSON, ReviewProblem } from "./types";
 import { extractIssueScopePaths, outOfScopeFiles, type ChangedFile } from "./scope";
@@ -275,6 +277,9 @@ export async function reviewPR(
   env: Env,
   args: { owner: string; repo: string; prNumber?: number; prNumbers?: number[]; headSha?: string; force?: boolean; freshAi?: boolean },
 ): Promise<ReviewOutcome[]> {
+  // Every caller runs inside a Worker that is stopped about 30s in, so the whole run,
+  // including the AI call, has to finish (and comment) before then.
+  const deadlineAt = deadlineFrom(Date.now());
   const outcomes: ReviewOutcome[] = [];
   const repoCfg = await getRepo(env, args.owner, args.repo);
   if (!repoCfg) return outcomes;
@@ -301,9 +306,14 @@ export async function reviewPR(
     keys.claude = { apiKey: await decryptSecret(user.anthropicKeyCipher, env.ENCRYPTION_KEY), model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL };
   }
 
-  for (const n of prNumbers) {
+  for (const [i, n] of prNumbers.entries()) {
+    if (i > 0 && !hasTimeForAnotherPR(deadlineAt, Date.now())) {
+      console.warn(`review: out of time, left ${prNumbers.slice(i).map((x) => "#" + x).join(", ")} for the next sweep`);
+      break;
+    }
     try {
       const outcome = await reviewOne(env, {
+        deadlineAt,
         owner: args.owner,
         repo: args.repo,
         n,
@@ -335,6 +345,7 @@ async function reviewOne(
     mergeStrategy: "squash" | "merge" | "rebase";
     force: boolean;
     freshAi: boolean;
+    deadlineAt: number;
   },
 ): Promise<ReviewOutcome | null> {
   const { owner, repo, n, installationId } = a;
@@ -653,17 +664,30 @@ async function reviewOne(
       `<diff>\n${diff}\n</diff>`,
     ].join("\n\n");
     try {
-      review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt);
+      review = await runReview(a.keys, SYSTEM_PROMPT, userPrompt, {
+        deadlineAt: a.deadlineAt,
+        claudeFirst: claudeFirst(prev, pr.head.sha),
+      });
     } catch (e) {
-      // Without this the PR got no comment at all: the error only reached the Worker logs.
-      const why = (e as Error).message.replace(/\s+/g, " ").slice(0, 200);
-      console.error(`AI review failed on ${owner}/${repo}#${n}: ${why}`);
-      gates.push({ name: "AI code review", mark: "wait", note: "could not run, will retry" });
+      // Never stay silent: post the gate table with the provider's error and keep the PR
+      // queued, so the sweep tries again (Gemini, then Claude) until a review succeeds.
+      // Nothing merges until then.
+      const why = (e as Error).message.replace(/\s+/g, " ").slice(0, 300);
+      const lastProvider = e instanceof AiReviewError ? e.lastProvider : "none";
+      const attempts = nextAttemptCount(prev, pr.head.sha);
+      console.error(`AI review failed on ${owner}/${repo}#${n} (attempt ${attempts}): ${why}`);
+      const retryMin = Math.round(MIN_GAP_SECONDS / 60);
+      gates.push({ name: "AI code review", mark: "wait", note: `attempt ${attempts} failed, retrying in about ${retryMin} min` });
       steps.push({
         title: "Nothing to do on your side: the AI reviewer is unavailable right now.",
-        detail: `AutoMerge will retry automatically. Maintainer: the AI provider returned \`${why}\`. Check the API keys with \`/status\`.`,
+        detail:
+          `AutoMerge retries about every ${retryMin} minutes and will only merge after a review succeeds. ` +
+          `Maintainer: attempt ${attempts} failed with \`${why}\`. Check the API keys with \`/status\`.`,
       });
-      return finish("queued", "AutoMerge: waiting for the AI reviewer", "thanks for the PR! Every check so far passes; the AI review couldn't run yet.");
+      return finish("queued", "AutoMerge: waiting for the AI reviewer", "thanks for the PR! Every check so far passes; the AI review couldn't run yet.", {
+        aiAttempts: attempts,
+        aiLastProvider: lastProvider,
+      });
     }
   }
 

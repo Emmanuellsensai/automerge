@@ -5,8 +5,6 @@ import { geminiShouldFallBack } from "./fallback";
 import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
-// Short enough that a Claude fallback still fits in the same Worker invocation.
-const PER_CALL_TIMEOUT_MS = 25_000;
 
 // Structured output schema (OpenAPI subset accepted by Gemini's responseSchema).
 const RESPONSE_SCHEMA = {
@@ -44,10 +42,12 @@ export async function callGemini(
   model: string,
   systemPrompt: string,
   userPrompt: string,
+  // Set by runReview so the call ends in time for the Worker to post its comment.
+  timeoutMs = 25_000,
 ): Promise<ReviewJSON> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
+  const t = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -92,14 +92,14 @@ export async function callGemini(
     promptFeedback?: { blockReason?: string };
   };
   if (data.promptFeedback?.blockReason) {
-    throw new Error(`Gemini blocked the prompt: ${data.promptFeedback.blockReason}`);
+    throw new ProviderUnavailableError("gemini", `Gemini blocked the prompt: ${data.promptFeedback.blockReason}`);
   }
   const cand = data.candidates?.[0];
   const text = (cand?.content?.parts ?? [])
     .filter((p) => !p.thought && p.text)
     .map((p) => p.text)
     .join("");
-  if (!text) throw new Error(`Gemini returned no text (finishReason=${cand?.finishReason ?? "unknown"})`);
+  if (!text) throw new ProviderUnavailableError("gemini", `Gemini returned no text (finishReason=${cand?.finishReason ?? "unknown"})`);
 
   let parsed: ReviewJSON;
   try {
@@ -109,7 +109,7 @@ export async function callGemini(
     try {
       parsed = JSON.parse(extractJSON(text)) as ReviewJSON;
     } catch {
-      throw new Error(`Gemini returned non-JSON response: ${text.slice(0, 300)}`);
+      throw new ProviderUnavailableError("gemini", `Gemini returned non-JSON response: ${text.slice(0, 300)}`);
     }
   }
   return { ...normalizeReview(parsed), provider: "gemini" };
