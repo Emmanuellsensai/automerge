@@ -33,7 +33,7 @@ export async function runSetup(env: Env, ctx: CommandContext) {
     return ephemeral(
       "Paste your Gemini API key after `/setup`.\n" +
         "Don't have one? Go to https://aistudio.google.com/apikey, sign in with Google, click **Create API key**, and copy it.\n\n" +
-        "Optional backup: also paste an Anthropic key in `anthropic_api_key`. AutoMerge only uses it when Gemini is busy or out of quota.",
+        "You can also paste an Anthropic key in `anthropic_api_key`. When it is saved, Claude does the reviews and Gemini is the backup.",
     );
   }
 
@@ -50,10 +50,10 @@ export async function runSetup(env: Env, ctx: CommandContext) {
   if (anthropicKey) patch.anthropicKeyCipher = await encryptSecret(anthropicKey, env.ENCRYPTION_KEY);
   const user = await upsertUser(env, ctx.userId, patch);
 
-  const saved = [geminiKey && "Gemini key", anthropicKey && "Anthropic backup key"].filter(Boolean).join(" and ");
+  const saved = [geminiKey && "Gemini key", anthropicKey && "Anthropic key"].filter(Boolean).join(" and ");
   const lines = [`Saved your ${saved} (checked, then encrypted; only used to review your PRs).`];
-  if (!user.geminiKeyCipher) lines.push("Tip: add a Gemini key too with `/setup gemini_api_key:...`. Gemini is the main reviewer; Anthropic is the backup.");
-  else if (!user.anthropicKeyCipher) lines.push("Optional: add a backup with `/setup anthropic_api_key:...` so reviews keep working when Gemini hits its rate limit.");
+  if (!user.geminiKeyCipher) lines.push("Optional: add a Gemini key too with `/setup gemini_api_key:...` as a backup for when Claude is unavailable.");
+  else if (!user.anthropicKeyCipher) lines.push("Recommended: add an Anthropic key with `/setup anthropic_api_key:...`. Claude then does the reviews and Gemini becomes the backup.");
   lines.push("", "**Next:** run `/connect` to give AutoMerge access to your GitHub repo (skip if you already did).");
   return ephemeral(lines.join("\n"));
 }

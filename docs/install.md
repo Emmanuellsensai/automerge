@@ -36,7 +36,7 @@ Type `/help` in any channel. If AutoMerge answers, it's in.
 
 AutoMerge checks the key with Google right away. If it says the key isn't valid, copy it again and retry.
 
-**Optional backup key.** Gemini's free tier has rate limits. If you also add an Anthropic key, AutoMerge switches to Claude only when Gemini is rate-limited, out of quota, overloaded, or has a billing or key problem, so reviews never stall. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
+**Anthropic key (recommended).** If you add an Anthropic key, Claude (Haiku 5.5 by default) does the reviews and Gemini becomes the backup, used only when Claude is rate-limited, overloaded, or has a billing or key problem. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) (it starts with `sk-ant-`; Anthropic requires billing to be set up), then type `/setup` and paste it into the `anthropic_api_key` box. You can add it any time later.
 
 Your key is encrypted before it is saved and is only used to review your PRs. Keep it private: don't paste it anywhere else in the chat.
 
@@ -102,7 +102,7 @@ Only when **all** of these are true:
 4. **Only files the issue covers are changed.** If the issue mentions file paths in backticks (like `` `src/api/handler.go` ``), the PR may only change those. Tests and docs are always allowed. If the issue names no paths, this check is skipped.
 5. **No merge conflicts.**
 6. **Automatic tests (CI) pass.** Preview-deploy checks (Vercel, Netlify, Cloudflare Pages, Render) are ignored.
-7. **The AI review approves** (Gemini, or Claude if Gemini was busy) and confirms the PR solves the issue.
+7. **The AI review approves** (Claude, or Gemini if Claude was unavailable) and confirms the PR solves the issue.
 8. **You turned auto-merge on** (Step 5).
 
 Checks 1 to 4 are free. The AI is only asked when they pass, and at most once per commit.
@@ -191,7 +191,9 @@ Secrets set with `wrangler secret put` are kept. Plain variables come from `[var
 
 **The bot didn't comment on a PR**: type `/check` and paste the PR link. The answer in Discord tells you what happened. Common reasons: the PR is a draft, AutoMerge is paused (`/on`), or the repo isn't added (`/repo list`).
 
-**"Gemini 429" or "Gemini 403" in a review**: Gemini is rate-limited, out of quota, or has a billing or key problem. With an Anthropic backup key saved (`/setup anthropic_api_key:...`), Claude reviews instead; this message only appears when no backup key is saved. Fix billing in Google AI Studio to use Gemini again.
+**"Claude 401" in a review**: the saved Anthropic key is invalid or revoked. Create a new one at console.anthropic.com/settings/keys and save it with `/setup anthropic_api_key:...` (keys are stored encrypted in the bot's database, not as Worker secrets).
+
+**"Gemini 429" or "Gemini 403" in a review**: Gemini is rate-limited, out of quota, or has a billing or key problem. Fix billing in Google AI Studio, or rely on Claude.
 
 **"The merge was rejected by GitHub"**: usually branch protection. Check the repo's branch rules, or merge by hand.
 

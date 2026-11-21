@@ -38,8 +38,9 @@ export function nextAttemptCount(prev: AiAttemptState | null | undefined, headSh
   return prev && prev.lastCommitSha === headSha ? (prev.aiAttempts ?? 0) + 1 : 1;
 }
 
-// After Gemini failed or timed out on this commit, try Claude first next time so a slow
-// Gemini can't use up every run's time before the backup gets a turn.
+// Claude is the main reviewer. Only when Claude was the one that failed on this commit does
+// the next attempt start with Gemini, so a failing Claude can't use up every run's time
+// before the backup gets a turn.
 export function claudeFirst(prev: AiAttemptState | null | undefined, headSha: string): boolean {
-  return !!prev && prev.lastCommitSha === headSha && (prev.aiAttempts ?? 0) > 0 && prev.aiLastProvider === "gemini";
+  return !(!!prev && prev.lastCommitSha === headSha && (prev.aiAttempts ?? 0) > 0 && prev.aiLastProvider === "claude");
 }
