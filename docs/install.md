@@ -172,6 +172,15 @@ A first-time contributor's PR with none of those signals follows the `MALWARE_GA
 
 `MALWARE_GATE_TRUSTED="login1,login2"` treats those logins as repeat contributors. Content signals still apply to them.
 
+## Automatic deploys
+
+`.github/workflows/deploy.yml` runs the type check and tests on every PR, and on every push to `main` also runs `wrangler deploy`. It needs two repository secrets (Settings → Secrets and variables → Actions):
+
+- `CLOUDFLARE_API_TOKEN`: create at dash.cloudflare.com → My Profile → API Tokens → Create Token → **Edit Cloudflare Workers** template.
+- `CLOUDFLARE_ACCOUNT_ID`: shown on the Workers & Pages overview page in the Cloudflare dashboard.
+
+Secrets set with `wrangler secret put` are kept. Plain variables come from `[vars]` in `wrangler.toml` on every deploy, exactly as with `pnpm deploy`.
+
 ## Troubleshooting
 
 **"Step 1 isn't done yet"**: run `/setup` with your Gemini key first.
