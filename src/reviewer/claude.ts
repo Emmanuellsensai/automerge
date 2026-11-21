@@ -36,8 +36,11 @@ export async function callClaude(
   model: string,
   systemPrompt: string,
   userPrompt: string,
+  // Set by runReview so the call ends in time for the Worker to post its comment. No SDK
+  // retries: a retry would run past that time. The sweep retries the PR later instead.
+  timeoutMs = 40_000,
 ): Promise<ReviewJSON> {
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 40_000 });
+  const client = new Anthropic({ apiKey, maxRetries: 0, timeout: timeoutMs });
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({

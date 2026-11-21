@@ -44,6 +44,9 @@ export type PRReviewState = {
   cachedReview?: string;
   cachedAddressesIssue?: boolean;
   cachedCommentPosted?: boolean;
+  // AI review attempts that failed on lastCommitSha, and which provider failed last.
+  aiAttempts?: number;
+  aiLastProvider?: string;
 };
 
 const userKey = (id: string) => `user:${id}`;
@@ -204,6 +207,8 @@ const STATE_MEANINGFUL_FIELDS: (keyof PRReviewState)[] = [
   "cachedForIssue",
   "cachedForIssues",
   "cachedReview",
+  "aiAttempts",
+  "aiLastProvider",
 ];
 
 function statesEqual(a: PRReviewState | null | undefined, b: PRReviewState): boolean {
