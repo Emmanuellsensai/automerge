@@ -9,8 +9,8 @@ const commands = [
     name: "setup",
     description: "Step 1: save your Gemini API key (free from aistudio.google.com/apikey).",
     options: [
-      { name: "gemini_api_key", description: "Paste your Gemini API key here (main reviewer)", type: 3, required: false },
-      { name: "anthropic_api_key", description: "Optional backup: used only when Gemini is busy or out of quota", type: 3, required: false },
+      { name: "gemini_api_key", description: "Gemini API key (backup reviewer when an Anthropic key is set)", type: 3, required: false },
+      { name: "anthropic_api_key", description: "Anthropic API key: Claude is the main reviewer when this is set", type: 3, required: false },
     ],
   },
   { name: "connect", description: "Step 2: get the link to install AutoMerge on your GitHub repo." },

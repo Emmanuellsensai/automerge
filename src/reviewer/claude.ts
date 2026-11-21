@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { normalizeReview, ProviderUnavailableError, type ReviewJSON } from "./types";
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5";
 
 // Structured-output schema: every object needs additionalProperties: false.
 const REVIEW_SCHEMA = {

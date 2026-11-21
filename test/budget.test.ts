@@ -47,9 +47,9 @@ test("failed attempts count up on the same commit and reset on a new one", () =>
   assert.equal(nextAttemptCount({ lastCommitSha: "a", aiAttempts: 2 }, "b"), 1);
 });
 
-test("after Gemini failed on this commit, the next attempt starts with Claude", () => {
+test("Claude goes first unless Claude failed on this commit", () => {
   assert.equal(claudeFirst({ lastCommitSha: "a", aiAttempts: 1, aiLastProvider: "gemini" }, "a"), true);
   assert.equal(claudeFirst({ lastCommitSha: "a", aiAttempts: 1, aiLastProvider: "claude" }, "a"), false);
-  assert.equal(claudeFirst({ lastCommitSha: "a", aiAttempts: 1, aiLastProvider: "gemini" }, "b"), false);
-  assert.equal(claudeFirst(null, "a"), false);
+  assert.equal(claudeFirst({ lastCommitSha: "a", aiAttempts: 1, aiLastProvider: "claude" }, "b"), true);
+  assert.equal(claudeFirst(null, "a"), true);
 });

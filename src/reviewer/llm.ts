@@ -23,8 +23,8 @@ export class AiReviewError extends Error {
   }
 }
 
-// Gemini is primary. Claude runs when Gemini can't serve right now (key, billing, quota,
-// overload, timeout, unusable answer) or when no Gemini key is saved. Each call's timeout
+// Claude is primary. Gemini runs when Claude can't serve right now (key, billing, quota,
+// overload, timeout, unusable answer) or when no Anthropic key is saved. Each call's timeout
 // fits inside the run's deadline.
 export async function runReview(keys: LlmKeys, systemPrompt: string, userPrompt: string, opts: RunOptions = {}): Promise<ReviewJSON> {
   const deadlineAt = opts.deadlineAt ?? Date.now() + RUN_BUDGET_MS;
